@@ -25,7 +25,7 @@ async function getWorkspaceView() {
   try {
     const supabase = await createServerSupabaseClient();
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return { kind: "demo" as const };
+    if (!user) return { kind: "unauthenticated" as const };
 
     const { data: membership, error: membershipError } = await supabase
       .from("workspace_members")
@@ -93,15 +93,16 @@ async function getWorkspaceView() {
       },
       conversations: initialConversations,
     };
-  } catch {
-    // A public preview remains usable before local credentials are configured.
-    return { kind: "demo" as const };
+  } catch (error) {
+    console.error("Unable to load workspace", error);
+    return { kind: "unavailable" as const };
   }
 }
 
 export default async function AppPage() {
   const view = await getWorkspaceView();
+  if (view.kind === "unauthenticated") redirect("/login");
   if (view.kind === "onboarding") redirect("/onboarding");
   if (view.kind === "workspace") return <AppShell initialWorkspace={view.workspace} initialConversations={view.conversations} isDemo={false} />;
-  return <AppShell />;
+  redirect("/login?error=workspace_unavailable");
 }
