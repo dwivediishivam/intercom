@@ -21,6 +21,8 @@ coverage/
 .vscode/
 *.swp
 *.swo
+AGENTS.md
+CLAUDE.md
 
 # Local test artifacts
 playwright-report/

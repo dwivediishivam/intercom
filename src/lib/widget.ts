@@ -116,6 +116,16 @@ export async function bootstrapVisitor({
     .maybeSingle();
   if (conversationError) throw conversationError;
 
+  const { data: messages, error: messagesError } = conversation
+    ? await admin
+        .from("messages")
+        .select("id, sender_type, body_text, sent_at, delivery_status")
+        .eq("conversation_id", conversation.id)
+        .order("sent_at", { ascending: true })
+        .limit(100)
+    : { data: [], error: null };
+  if (messagesError) throw messagesError;
+
   return {
     workspaceId: workspace.id,
     workspaceName: workspace.name,
@@ -123,6 +133,7 @@ export async function bootstrapVisitor({
     visitorSessionId: session.id,
     contactId: session.contact_id,
     conversation,
+    messages: messages ?? [],
   };
 }
 
