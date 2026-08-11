@@ -7,7 +7,7 @@ export async function resolvePublicKnowledgeWorkspace(hostname: string) {
     .from("custom_domains")
     .select("workspace_id")
     .eq("hostname", normalizedHost)
-    .eq("status", "active")
+    .in("status", ["verified", "active"])
     .maybeSingle();
   if (domainError) throw domainError;
   if (domain) return domain.workspace_id;

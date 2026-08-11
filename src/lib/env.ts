@@ -18,6 +18,7 @@ const serverEnvironmentSchema = publicEnvironmentSchema.extend({
   CRON_SECRET: z.string().min(1).optional(),
   VERCEL_TOKEN: z.string().min(1).optional(),
   VERCEL_TEAM_ID: z.string().min(1).optional(),
+  VERCEL_PROJECT_ID: z.string().min(1).optional(),
 });
 
 export type ServerEnvironment = z.infer<typeof serverEnvironmentSchema>;
@@ -48,5 +49,6 @@ export function getServerEnvironment(): ServerEnvironment {
     CRON_SECRET: process.env.CRON_SECRET,
     VERCEL_TOKEN: process.env.VERCEL_TOKEN,
     VERCEL_TEAM_ID: process.env.VERCEL_TEAM_ID,
+    VERCEL_PROJECT_ID: process.env.VERCEL_PROJECT_ID,
   });
 }

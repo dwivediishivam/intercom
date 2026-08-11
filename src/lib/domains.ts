@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { resolveTxt } from "node:dns/promises";
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { attachVercelDomain } from "@/lib/vercel-domains";
 
 const hostnamePattern = /^(?=.{1,253}$)(?!-)(?:[a-z0-9-]{1,63}\.)+[a-z]{2,63}$/;
 
@@ -73,17 +74,25 @@ export async function verifyCustomDomain(domainId: string, workspaceId: string) 
   }
 
   const isVerified = txtRecords.some((record) => record.join("") === domain.verification_token);
+  let status: "pending_dns" | "verified" | "provisioning_tls" | "active" | "failed" = isVerified ? "verified" : "pending_dns";
+  let failureReason: string | null = isVerified ? null : "The verification TXT record does not match.";
+  if (isVerified) {
+    try {
+      const provision = await attachVercelDomain(domain.hostname);
+      status = provision.configured ? "active" : "verified";
+    } catch (error) {
+      status = "failed";
+      failureReason = error instanceof Error ? error.message : "TLS provisioning could not start.";
+    }
+  }
+
   const { data: updated, error: updateError } = await admin
     .from("custom_domains")
-    .update({
-      status: isVerified ? "verified" : "pending_dns",
-      verification_checked_at: new Date().toISOString(),
-      failure_reason: isVerified ? null : "The verification TXT record does not match.",
-    })
+    .update({ status, verification_checked_at: new Date().toISOString(), failure_reason: failureReason })
     .eq("id", domain.id)
     .select("id, hostname, status, verification_checked_at, failure_reason")
     .single();
   if (updateError) throw updateError;
 
-  return { verified: isVerified, domain: updated };
+  return { verified: isVerified, domain: updated, tlsManagedByVercel: status === "active" };
 }
