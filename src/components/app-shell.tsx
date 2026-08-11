@@ -1,6 +1,7 @@
 "use client";
 
 import { KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 
 import { ConversationWorkspace } from "@/components/conversation-workspace";
 import { HelpCenterSurface, KnowledgeSurface, WidgetDemoSurface } from "@/components/knowledge-and-widget";
@@ -50,6 +51,7 @@ function DemoBadge() {
 }
 
 export function AppShell() {
+  const router = useRouter();
   const [screen, setScreen] = useState<Screen>("inbox");
   const [status, setStatus] = useState<ConversationStatus>("open");
   const [channel, setChannel] = useState<"all" | ConversationChannel>("all");
@@ -160,7 +162,7 @@ export function AppShell() {
             <button
               className={`nav-item ${screen === item.key ? "nav-item--active" : ""}`}
               key={item.key}
-              onClick={() => changeScreen(item.key)}
+              onClick={() => item.key === "auth" ? router.push("/login") : changeScreen(item.key)}
             >
               <span className="nav-item__dot" />
               <span>{item.label}</span>
