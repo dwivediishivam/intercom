@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { DemoConversation } from "@/lib/demo-data";
 
@@ -13,6 +13,14 @@ type ThreadMessage = {
   body: string;
   time: string;
   readBy?: string;
+};
+
+type StoredMessage = {
+  id: string;
+  sender_type: "contact" | "agent" | "system" | "ai";
+  body_text: string;
+  sent_at: string;
+  delivery_status: string;
 };
 
 const threadByConversation: Record<string, ThreadMessage[]> = {
@@ -30,28 +38,72 @@ function defaultThread(conversation: DemoConversation): ThreadMessage[] {
   ];
 }
 
+function storedMessageToThread(message: StoredMessage, conversation: DemoConversation): ThreadMessage {
+  const sentAt = new Date(message.sent_at);
+  const time = Number.isNaN(sentAt.getTime()) ? "Now" : sentAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  if (message.sender_type === "contact") {
+    return { id: message.id, author: conversation.name, initials: conversation.initials, tone: "peach", role: "customer", body: message.body_text, time };
+  }
+  return { id: message.id, author: "Your team", initials: "YT", tone: "current", role: "agent", body: message.body_text, time, readBy: message.delivery_status === "read" ? "Read" : undefined };
+}
+
 type Props = {
   conversation: DemoConversation;
   onBack: () => void;
   onToast: (message: string) => void;
   onResolve: () => void;
   onSnooze: () => void;
+  isDemo: boolean;
 };
 
-export function ConversationWorkspace({ conversation, onBack, onToast, onResolve, onSnooze }: Props) {
-  const [messages, setMessages] = useState<ThreadMessage[]>(() => threadByConversation[conversation.id] ?? defaultThread(conversation));
+export function ConversationWorkspace({ conversation, onBack, onToast, onResolve, onSnooze, isDemo }: Props) {
+  const [messages, setMessages] = useState<ThreadMessage[]>(() => isDemo ? threadByConversation[conversation.id] ?? defaultThread(conversation) : []);
   const [draft, setDraft] = useState("");
   const [mode, setMode] = useState<"reply" | "note">("reply");
   const [summaryVisible, setSummaryVisible] = useState(false);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [draftLoading, setDraftLoading] = useState(false);
   const [showCanned, setShowCanned] = useState(false);
+  const [summaryText, setSummaryText] = useState<string | null>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
 
-  function sendMessage() {
+  useEffect(() => {
+    if (isDemo) return;
+    let active = true;
+    void fetch(`/api/conversations/${conversation.id}/messages`)
+      .then(async (response) => {
+        const payload = await response.json() as { messages?: StoredMessage[]; error?: string };
+        if (!response.ok) throw new Error(payload.error ?? "Could not load this conversation.");
+        if (active) setMessages((payload.messages ?? []).map((message) => storedMessageToThread(message, conversation)));
+      })
+      .catch((error: unknown) => {
+        if (active) onToast(error instanceof Error ? error.message : "Could not load this conversation.");
+      });
+    return () => { active = false; };
+  }, [conversation, isDemo, onToast]);
+
+  async function sendMessage() {
     const body = draft.trim();
     if (!body) {
       composerRef.current?.focus();
+      return;
+    }
+    if (!isDemo && mode === "reply") {
+      try {
+        const response = await fetch(`/api/conversations/${conversation.id}/messages`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ bodyText: body, clientMessageId: crypto.randomUUID() }),
+        });
+        const payload = await response.json() as { message?: StoredMessage; error?: string };
+        if (!response.ok || !payload.message) throw new Error(payload.error ?? "Reply could not be sent.");
+        const sentMessage = payload.message;
+        setMessages((current) => [...current, storedMessageToThread(sentMessage, conversation)]);
+        setDraft("");
+        onToast(`Reply sent to ${conversation.name.split(" ")[0]}`);
+      } catch (error) {
+        onToast(error instanceof Error ? error.message : "Reply could not be sent.");
+      }
       return;
     }
     setMessages((current) => [
@@ -73,18 +125,42 @@ export function ConversationWorkspace({ conversation, onBack, onToast, onResolve
 
   async function createSummary() {
     setSummaryLoading(true);
-    await new Promise((resolve) => window.setTimeout(resolve, 420));
-    setSummaryLoading(false);
-    setSummaryVisible(true);
+    try {
+      if (isDemo) {
+        await new Promise((resolve) => window.setTimeout(resolve, 420));
+      } else {
+        const response = await fetch(`/api/conversations/${conversation.id}/ai`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "summary" }) });
+        const payload = await response.json() as { summary?: string; error?: string };
+        if (!response.ok || !payload.summary) throw new Error(payload.error ?? "Summary could not be generated.");
+        setSummaryText(payload.summary);
+      }
+      setSummaryVisible(true);
+    } catch (error) {
+      onToast(error instanceof Error ? error.message : "Summary could not be generated.");
+    } finally {
+      setSummaryLoading(false);
+    }
   }
 
   async function createDraft() {
     setDraftLoading(true);
-    await new Promise((resolve) => window.setTimeout(resolve, 380));
-    setDraftLoading(false);
-    setDraft("Thanks for the details, Priya. We’ve identified the payment flow and are checking the final fix now. I’ll send a confirmation as soon as it’s complete—there’s nothing else you need to try at the moment.");
-    composerRef.current?.focus();
-    onToast("AI reply draft is ready for review");
+    try {
+      if (isDemo) {
+        await new Promise((resolve) => window.setTimeout(resolve, 380));
+        setDraft("Thanks for the details, Priya. We’ve identified the payment flow and are checking the final fix now. I’ll send a confirmation as soon as it’s complete—there’s nothing else you need to try at the moment.");
+      } else {
+        const response = await fetch(`/api/conversations/${conversation.id}/ai`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "reply_draft" }) });
+        const payload = await response.json() as { draft?: string; error?: string };
+        if (!response.ok || !payload.draft) throw new Error(payload.error ?? "Reply draft could not be generated.");
+        setDraft(payload.draft);
+      }
+      composerRef.current?.focus();
+      onToast("AI reply draft is ready for review");
+    } catch (error) {
+      onToast(error instanceof Error ? error.message : "Reply draft could not be generated.");
+    } finally {
+      setDraftLoading(false);
+    }
   }
 
   function insertCannedReply(text: string) {
@@ -116,9 +192,11 @@ export function ConversationWorkspace({ conversation, onBack, onToast, onResolve
           {summaryVisible ? (
             <aside className="ai-summary" aria-live="polite">
               <div className="ai-summary__heading"><span className="sparkle" aria-hidden="true">✦</span><strong>Issue summary</strong><span>Updated just now</span></div>
-              <p><strong>Need:</strong> {conversation.name.split(" ")[0]} needs help with {conversation.subject.toLowerCase()}.</p>
-              <p><strong>Tried:</strong> Multiple browsers and payment methods; no inline error is shown.</p>
-              <p><strong>Now:</strong> Agent is validating the payment flow and will confirm the resolution.</p>
+              {summaryText ? summaryText.split("\n").filter(Boolean).map((line) => <p key={line}>{line}</p>) : <>
+                <p><strong>Need:</strong> {conversation.name.split(" ")[0]} needs help with {conversation.subject.toLowerCase()}.</p>
+                <p><strong>Tried:</strong> Multiple browsers and payment methods; no inline error is shown.</p>
+                <p><strong>Now:</strong> Agent is validating the payment flow and will confirm the resolution.</p>
+              </>}
             </aside>
           ) : (
             <button className="summary-trigger" onClick={createSummary} disabled={summaryLoading}>

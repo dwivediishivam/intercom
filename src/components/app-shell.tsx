@@ -252,6 +252,7 @@ export function AppShell({
             onToast={announce}
             onResolve={() => void updateConversationStatus("resolve")}
             onSnooze={() => void updateConversationStatus("snooze")}
+            isDemo={isDemo}
           />
         ) : screen === "inbox" ? (
           <section className="inbox" aria-label="Unified inbox">

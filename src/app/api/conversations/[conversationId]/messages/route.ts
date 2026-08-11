@@ -1,12 +1,29 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { requireWorkspaceMembership } from "@/lib/auth";
-import { createAgentMessage, getConversationWorkspace } from "@/lib/conversations";
+import { createAgentMessage, getConversationWorkspace, listConversationMessages } from "@/lib/conversations";
 import { sendEmailReply } from "@/lib/email";
 import { toErrorResponse } from "@/lib/http";
 import { agentMessageSchema, uuidSchema } from "@/lib/validation";
 
 export const dynamic = "force-dynamic";
+
+export async function GET(
+  _request: NextRequest,
+  context: { params: Promise<{ conversationId: string }> },
+) {
+  try {
+    void _request;
+    const { conversationId } = await context.params;
+    uuidSchema.parse(conversationId);
+    const conversation = await getConversationWorkspace(conversationId);
+    await requireWorkspaceMembership(conversation.workspace_id);
+    const messages = await listConversationMessages(conversationId);
+    return NextResponse.json({ messages });
+  } catch (error) {
+    return toErrorResponse(error);
+  }
+}
 
 export async function POST(
   request: NextRequest,
