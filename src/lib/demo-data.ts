@@ -4,6 +4,8 @@ export type SlaState = "met" | "at-risk" | "breached";
 
 export type DemoConversation = {
   id: string;
+  /** Real workspace records keep the contact id here; the preview has none. */
+  contactId?: string;
   name: string;
   email: string;
   location: string;
@@ -13,6 +15,7 @@ export type DemoConversation = {
   status: ConversationStatus;
   subject: string;
   preview: string;
+  assigneeId?: string | null;
   assignee: { name: string; initials: string; tone: "ink" | "moss" | "terracotta" } | null;
   tag: string;
   updatedLabel: string;

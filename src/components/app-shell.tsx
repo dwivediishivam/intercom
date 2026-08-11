@@ -10,7 +10,6 @@ import { RealtimeBridge } from "@/components/realtime-bridge";
 import {
   type ConversationChannel,
   type ConversationStatus,
-  demoWorkspace,
   type DemoConversation,
   type SlaState,
 } from "@/lib/demo-data";
@@ -23,6 +22,7 @@ type WorkspaceView = {
   name: string;
   slug: string;
   currentUser: { name: string; initials: string; role: string; location: string };
+  members: Array<{ id: string; name: string; initials: string; role: string; location: string; tone: "current" | "sage" | "sand" | "peach" }>;
 };
 
 const mainNavigation: Array<{ key: Screen; label: string }> = [
@@ -59,12 +59,12 @@ function DemoBadge() {
 }
 
 export function AppShell({
-  initialWorkspace = demoWorkspace,
-  initialConversations = demoWorkspace.conversations,
-  isDemo = true,
+  initialWorkspace,
+  initialConversations,
+  isDemo = false,
 }: {
-  initialWorkspace?: WorkspaceView;
-  initialConversations?: DemoConversation[];
+  initialWorkspace: WorkspaceView;
+  initialConversations: DemoConversation[];
   isDemo?: boolean;
 }) {
   const router = useRouter();
@@ -99,10 +99,10 @@ export function AppShell({
     return conversations
       .filter((item) => item.status === status)
       .filter((item) => channel === "all" || item.channel === channel)
-      .filter((item) => assignee === "all" || (assignee === "me" ? item.assignee?.name === "Aditi" : item.assignee === null))
+      .filter((item) => assignee === "all" || (assignee === "me" ? item.assignee?.name === initialWorkspace.currentUser.name : item.assignee === null))
       .filter((item) => {
         if (view === "breaching") return item.sla.state === "breached";
-        if (view === "mine") return item.assignee?.name === "Aditi" && item.priority === "urgent";
+        if (view === "mine") return item.assignee?.name === initialWorkspace.currentUser.name && item.priority === "urgent";
         if (view === "unassigned") return item.channel === "chat" && item.assignee === null;
         if (view === "awaiting") return item.status === "snoozed";
         return true;
@@ -114,7 +114,7 @@ export function AppShell({
           .toLowerCase()
           .includes(normalizedQuery),
       );
-  }, [assignee, channel, conversations, query, showEmpty, status, view]);
+  }, [assignee, channel, conversations, initialWorkspace.currentUser.name, query, showEmpty, status, view]);
 
   useEffect(() => {
     const onShortcut = (event: globalThis.KeyboardEvent) => {
@@ -172,6 +172,31 @@ export function AppShell({
       : conversation));
     announce(label);
     setActiveConversationId(null);
+  }
+
+  async function assignConversation(conversationId: string, assigneeId: string | null) {
+    const member = assigneeId ? initialWorkspace.members.find((item) => item.id === assigneeId) : null;
+    if (!isDemo) {
+      try {
+        const response = await fetch(`/api/conversations/${conversationId}/actions`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ action: "assign", assigneeId }),
+        });
+        const payload = await response.json() as { error?: string };
+        if (!response.ok) throw new Error(payload.error ?? "Unable to update the assignee.");
+      } catch (error) {
+        announce(error instanceof Error ? error.message : "Unable to update the assignee.");
+        return false;
+      }
+    }
+    setConversations((current) => current.map((item) => item.id !== conversationId ? item : {
+      ...item,
+      assigneeId,
+      assignee: member ? { name: member.name, initials: member.initials, tone: member.role === "Admin" ? "terracotta" as const : "moss" as const } : null,
+    }));
+    announce(member ? `Assigned to ${member.name}` : "Conversation is now unassigned");
+    return true;
   }
 
   function openConversation(conversation: DemoConversation) {
@@ -243,12 +268,12 @@ export function AppShell({
 
       <main className="workspace">
         <div className="realtime-banner" role="status">
-          <span className="realtime-banner__spinner" aria-hidden="true" />
+          <span className={`realtime-banner__indicator realtime-banner__indicator--${isDemo ? "preview" : realtimeStatus}`} aria-hidden="true" />
           <span>{isDemo ? "Previewing a demo workspace. Sign in to connect live conversations." : realtimeStatus === "connected" ? "Live updates connected. New messages appear automatically." : "Reconnecting to the realtime channel. Replies will deliver automatically."}</span>
           <button onClick={() => announce("Realtime notice dismissed")}>Dismiss</button>
         </div>
 
-        {!isDemo && <RealtimeBridge workspaceId={initialWorkspace.id} onStatus={setRealtimeStatus} />}
+        {!isDemo && initialWorkspace.id && <RealtimeBridge workspaceId={initialWorkspace.id} onStatus={setRealtimeStatus} />}
 
         {screen === "inbox" && activeConversation ? (
           <ConversationWorkspace
@@ -259,6 +284,10 @@ export function AppShell({
             onResolve={() => void updateConversationStatus("resolve")}
             onSnooze={() => void updateConversationStatus("snooze")}
             isDemo={isDemo}
+            workspaceId={initialWorkspace.id}
+            workspaceMembers={initialWorkspace.members}
+            currentUser={initialWorkspace.currentUser}
+            onAssign={(assigneeId) => assignConversation(activeConversation.id, assigneeId)}
           />
         ) : screen === "inbox" ? (
           <section className="inbox" aria-label="Unified inbox">
@@ -272,10 +301,10 @@ export function AppShell({
                   {isDemo && <DemoBadge />}
                 </div>
                 <div className="header-actions">
-                  <button className="button button--secondary" onClick={() => setShowEmpty((current) => !current)}>
+                  {isDemo && <button className="button button--secondary" onClick={() => setShowEmpty((current) => !current)}>
                     {showEmpty ? "Show conversations" : "Preview empty state"}
-                  </button>
-                  <button className="button button--primary" onClick={() => announce("New conversation is ready to compose")}>New conversation</button>
+                  </button>}
+                  {!isDemo && <button className="button button--primary" onClick={() => announce("New customer conversations will appear here as chat or email arrives.")}>Channel setup</button>}
                 </div>
               </div>
 
@@ -332,7 +361,7 @@ export function AppShell({
             {selected.length > 0 && (
               <div className="bulk-toolbar" role="status">
                 <strong>{selected.length} selected</strong>
-                <button onClick={() => announce(`${selected.length} conversations assigned to Aditi`)}>Assign to me</button>
+                <button onClick={() => announce(`${selected.length} conversations selected. Open one to assign it to a teammate.`)}>Assign to me</button>
                 <button onClick={() => announce(`${selected.length} conversations snoozed until tomorrow 09:00`)}>Snooze</button>
                 <button onClick={() => { announce(`${selected.length} conversations resolved`); setSelected([]); }}>Resolve</button>
                 <button className="bulk-toolbar__clear" onClick={() => setSelected([])}>Clear</button>
@@ -389,7 +418,7 @@ export function AppShell({
         ) : screen === "analytics" ? (
           <AnalyticsSurface onToast={announce} workspaceId={isDemo ? undefined : initialWorkspace.id} />
         ) : screen === "settings" ? (
-          <SettingsSurface onToast={announce} workspaceId={isDemo ? undefined : initialWorkspace.id} workspacePublicId={isDemo ? undefined : initialWorkspace.publicId} />
+          <SettingsSurface onToast={announce} workspaceId={isDemo ? undefined : initialWorkspace.id} workspacePublicId={isDemo ? undefined : initialWorkspace.publicId} workspaceName={initialWorkspace.name} workspaceSlug={initialWorkspace.slug} members={initialWorkspace.members} />
         ) : (
           <section className="surface-placeholder">
             <span className="eyebrow">INTERCOM</span>
