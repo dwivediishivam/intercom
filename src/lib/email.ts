@@ -36,16 +36,27 @@ function addressLocalPart(address: string) {
 async function findWorkspaceForRecipients(recipients: string[]) {
   const admin = createAdminClient();
   const localParts = recipients.map(addressLocalPart);
-  const { data, error } = await admin
+  const { data: aliases, error: aliasesError } = await admin
     .from("workspaces")
     .select("id")
     .in("support_email_local_part", localParts)
     .limit(2);
-  if (error) throw error;
-  if (!data || data.length !== 1) {
+  if (aliasesError) throw aliasesError;
+
+  // A workspace slug is also a valid fallback inbox alias. This keeps inboxes
+  // reachable while a team is using the default configuration.
+  const { data: slugs, error: slugsError } = await admin
+    .from("workspaces")
+    .select("id")
+    .in("slug", localParts)
+    .limit(2);
+  if (slugsError) throw slugsError;
+
+  const workspaceIds = [...new Set([...(aliases ?? []), ...(slugs ?? [])].map((workspace) => workspace.id))];
+  if (workspaceIds.length !== 1) {
     throw new Error("No unique workspace is configured for this receiving address.");
   }
-  return data[0];
+  return { id: workspaceIds[0] };
 }
 
 export async function ingestInboundEmail(email: InboundEmail) {
@@ -208,9 +219,19 @@ export async function sendEmailReply({
   if (!sendingDomain) {
     throw new Error("RESEND_INBOUND_DOMAIN is not configured for email threading.");
   }
+  const { data: workspace, error: workspaceError } = await admin
+    .from("workspaces")
+    .select("slug, support_email_local_part")
+    .eq("id", conversation.workspace_id)
+    .single();
+  if (workspaceError || !workspace) throw workspaceError ?? new Error("Workspace not found.");
+
+  const inboxLocalPart = workspace.support_email_local_part || workspace.slug;
+  const replyAddress = `${inboxLocalPart}@${sendingDomain}`;
   const outboundMessageId = `platform-${messageId}@${sendingDomain}`;
   const { data, error } = await resend.emails.send({
     from: environment.RESEND_FROM_EMAIL,
+    replyTo: replyAddress,
     to: [contact.email],
     subject,
     text: bodyText,
