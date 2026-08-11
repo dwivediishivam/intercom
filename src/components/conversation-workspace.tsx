@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 
 import type { DemoConversation } from "@/lib/demo-data";
 
@@ -47,12 +47,6 @@ export function ConversationWorkspace({ conversation, onBack, onToast, onResolve
   const [draftLoading, setDraftLoading] = useState(false);
   const [showCanned, setShowCanned] = useState(false);
   const composerRef = useRef<HTMLTextAreaElement>(null);
-
-  useEffect(() => {
-    setMessages(threadByConversation[conversation.id] ?? defaultThread(conversation));
-    setDraft("");
-    setSummaryVisible(false);
-  }, [conversation]);
 
   function sendMessage() {
     const body = draft.trim();

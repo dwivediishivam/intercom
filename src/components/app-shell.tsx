@@ -3,6 +3,7 @@
 import { KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { ConversationWorkspace } from "@/components/conversation-workspace";
+import { HelpCenterSurface, KnowledgeSurface, WidgetDemoSurface } from "@/components/knowledge-and-widget";
 import {
   type ConversationChannel,
   type ConversationStatus,
@@ -34,10 +35,6 @@ const savedViews: Array<{ key: SavedView; label: string }> = [
   { key: "unassigned", label: "Unassigned chat" },
   { key: "awaiting", label: "Awaiting customer" },
 ];
-
-function statusClass(status: ConversationStatus) {
-  return `status-chip status-chip--${status}`;
-}
 
 function slaClass(state: SlaState) {
   return `status-chip status-chip--${state}`;
@@ -205,6 +202,7 @@ export function AppShell() {
 
         {screen === "inbox" && activeConversation ? (
           <ConversationWorkspace
+            key={activeConversation.id}
             conversation={activeConversation}
             onBack={() => setActiveConversationId(null)}
             onToast={announce}
@@ -331,6 +329,12 @@ export function AppShell() {
               )}
             </div>
           </section>
+        ) : screen === "knowledge" ? (
+          <KnowledgeSurface onToast={announce} />
+        ) : screen === "help" ? (
+          <HelpCenterSurface onToast={announce} />
+        ) : screen === "widget" ? (
+          <WidgetDemoSurface onToast={announce} />
         ) : (
           <section className="surface-placeholder">
             <span className="eyebrow">INTERCOM</span>
