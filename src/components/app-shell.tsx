@@ -4,6 +4,7 @@ import { KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { ConversationWorkspace } from "@/components/conversation-workspace";
 import { HelpCenterSurface, KnowledgeSurface, WidgetDemoSurface } from "@/components/knowledge-and-widget";
+import { AnalyticsSurface, SettingsSurface } from "@/components/operations-surfaces";
 import {
   type ConversationChannel,
   type ConversationStatus,
@@ -335,6 +336,10 @@ export function AppShell() {
           <HelpCenterSurface onToast={announce} />
         ) : screen === "widget" ? (
           <WidgetDemoSurface onToast={announce} />
+        ) : screen === "analytics" ? (
+          <AnalyticsSurface onToast={announce} />
+        ) : screen === "settings" ? (
+          <SettingsSurface onToast={announce} />
         ) : (
           <section className="surface-placeholder">
             <span className="eyebrow">INTERCOM</span>
