@@ -6,7 +6,7 @@ import { createServerSupabaseClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
-type WorkspaceRow = { id: string; name: string; slug: string };
+type WorkspaceRow = { id: string; public_id: string; name: string; slug: string };
 
 function initials(value: string) {
   return value.split(/\s+/).filter(Boolean).map((part) => part[0]).join("").slice(0, 2).toUpperCase() || "ME";
@@ -29,7 +29,7 @@ async function getWorkspaceView() {
 
     const { data: membership, error: membershipError } = await supabase
       .from("workspace_members")
-      .select("workspace_id, role, workspaces(id, name, slug)")
+      .select("workspace_id, role, workspaces(id, public_id, name, slug)")
       .eq("profile_id", user.id)
       .limit(1)
       .maybeSingle();
@@ -86,6 +86,7 @@ async function getWorkspaceView() {
       kind: "workspace" as const,
       workspace: {
         id: workspace.id,
+        publicId: workspace.public_id,
         name: workspace.name,
         slug: workspace.slug,
         currentUser: { name: ownName, initials: initials(ownName), role: membership.role === "admin" ? "Admin" : "Agent", location: profile?.timezone || "Your workspace" },

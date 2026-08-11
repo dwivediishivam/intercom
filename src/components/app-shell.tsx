@@ -19,6 +19,7 @@ type Screen = "inbox" | "knowledge" | "analytics" | "settings" | "help" | "widge
 type SavedView = "all" | "breaching" | "mine" | "unassigned" | "awaiting";
 type WorkspaceView = {
   id?: string;
+  publicId?: string;
   name: string;
   slug: string;
   currentUser: { name: string; initials: string; role: string; location: string };
@@ -388,7 +389,7 @@ export function AppShell({
         ) : screen === "analytics" ? (
           <AnalyticsSurface onToast={announce} workspaceId={isDemo ? undefined : initialWorkspace.id} />
         ) : screen === "settings" ? (
-          <SettingsSurface onToast={announce} />
+          <SettingsSurface onToast={announce} workspaceId={isDemo ? undefined : initialWorkspace.id} workspacePublicId={isDemo ? undefined : initialWorkspace.publicId} />
         ) : (
           <section className="surface-placeholder">
             <span className="eyebrow">INTERCOM</span>

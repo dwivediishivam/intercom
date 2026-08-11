@@ -70,27 +70,43 @@ function Metric({ label, value, change, good = false }: { label: string; value: 
   return <section className="metric-card"><span>{label}</span><strong>{value}</strong><small className={good ? "metric-card__good" : ""}>{change}</small></section>;
 }
 
-export function SettingsSurface({ onToast }: { onToast: Notice }) {
+export function SettingsSurface({ onToast, workspaceId, workspacePublicId }: { onToast: Notice; workspaceId?: string; workspacePublicId?: string }) {
   const [tab, setTab] = useState<SettingsTab>("team");
   const [domain, setDomain] = useState("");
   const [team, setTeam] = useState(teamMembers);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [webhookEnabled, setWebhookEnabled] = useState(true);
   const [copied, setCopied] = useState(false);
+  const [dnsInstructions, setDnsInstructions] = useState<Array<{ type: string; host: string; value: string; purpose: string }>>([]);
   const content = { team: "Team", workspace: "Workspace", email: "Email channel", widget: "Widget install", domains: "Custom domain", developers: "Developers" };
-  function invite(event: FormEvent<HTMLFormElement>) {
+  async function invite(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const email = String(form.get("email") ?? "").trim();
     const role = String(form.get("role") ?? "Agent");
     if (!email.includes("@")) { onToast("Enter a valid teammate email"); return; }
     const name = email.split("@")[0].split(/[._-]/).map((part) => part ? part[0].toUpperCase() + part.slice(1) : "").join(" ");
+    if (workspaceId) {
+      try {
+        const response = await fetch(`/api/workspaces/${workspaceId}/invitations`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email, role: role.toLowerCase() }) });
+        const payload = await response.json() as { error?: string };
+        if (!response.ok) throw new Error(payload.error ?? "Invitation could not be sent.");
+      } catch (error) { onToast(error instanceof Error ? error.message : "Invitation could not be sent."); return; }
+    }
     setTeam((current) => [...current, { name, initials: name.split(" ").map((part) => part[0]).join("").slice(0, 2), role, location: "Invitation pending", tone: "peach" }]);
     setInviteOpen(false); onToast(`Invitation sent to ${email}`);
   }
-  function addDomain(event: FormEvent<HTMLFormElement>) {
+  async function addDomain(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!/^[a-z0-9][a-z0-9.-]+\.[a-z]{2,}$/i.test(domain)) { onToast("Enter a public hostname such as help.yourcompany.com"); return; }
+    if (workspaceId) {
+      try {
+        const response = await fetch(`/api/workspaces/${workspaceId}/domains`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ hostname: domain }) });
+        const payload = await response.json() as { dns?: { records?: Array<{ type: string; host: string; value: string; purpose: string }> }; error?: string };
+        if (!response.ok || !payload.dns?.records) throw new Error(payload.error ?? "Domain could not be added.");
+        setDnsInstructions(payload.dns.records);
+      } catch (error) { onToast(error instanceof Error ? error.message : "Domain could not be added."); return; }
+    }
     onToast(`DNS instructions created for ${domain}`);
   }
   return (
@@ -98,8 +114,8 @@ export function SettingsSurface({ onToast }: { onToast: Notice }) {
       {tab === "team" && <section><SettingsHeading kicker="PEOPLE AND ACCESS" title="A small team with clear ownership." action={<button className="button button--primary" onClick={() => setInviteOpen(true)}>Invite teammate</button>} /><div className="member-list">{team.map((member) => <div key={member.name}><i className={`avatar avatar--${member.tone}`}>{member.initials}</i><span><strong>{member.name}</strong><small>{member.location}</small></span><b>{member.role}</b><button onClick={() => onToast(`${member.name}'s access settings opened`)}>Manage</button></div>)}</div><p className="settings-note">Admins can invite people, change workspace settings, and manage developer credentials. Agents can work with customer conversations.</p></section>}
       {tab === "workspace" && <section><SettingsHeading kicker="WORKSPACE" title="Intercom" /><form className="settings-form" onSubmit={(event) => { event.preventDefault(); onToast("Workspace details saved"); }}><label>Workspace name<input defaultValue="Intercom" /></label><label>Company website<input defaultValue="https://intercom-demo.vercel.app" /></label><label>Default timezone<select defaultValue="Asia/Kolkata"><option>Asia/Kolkata</option><option>Asia/Singapore</option><option>Europe/London</option></select></label><button className="button button--primary">Save changes</button></form></section>}
       {tab === "email" && <section><SettingsHeading kicker="EMAIL CHANNEL" title="A normal email in. A normal email out." /><div className="setup-card"><span className="status-chip status-chip--at-risk">Needs provider setup</span><h3>support@yourdomain.com</h3><p>Point Resend inbound email to this workspace. Incoming mail becomes a threaded conversation and dashboard replies preserve Message-ID headers.</p><ol><li>Verify your domain in Resend.</li><li>Add MX and SPF/DKIM records Resend provides.</li><li>Set the webhook URL to <code>/api/webhooks/resend</code>.</li></ol><button className="button button--secondary" onClick={() => onToast("Email provider setup details copied")}>Copy setup checklist</button></div></section>}
-      {tab === "widget" && <section><SettingsHeading kicker="WIDGET INSTALL" title="Install in under a minute." /><div className="setup-card"><span className="status-chip status-chip--met">Ready after deployment</span><p>Add this once just before the closing <code>&lt;/body&gt;</code> tag. It stores a visitor token locally so people can return to the same chat history.</p><pre>{`<script async\n  src="https://your-app.vercel.app/widget.js"\n  data-workspace="your-workspace-public-id">\n</script>`}</pre><button className="button button--secondary" onClick={() => { setCopied(true); onToast("Install script copied"); }}>{copied ? "Copied" : "Copy script"}</button></div></section>}
-      {tab === "domains" && <section><SettingsHeading kicker="CUSTOM DOMAIN" title="Your help center, on your domain." /><form className="domain-form" onSubmit={addDomain}><label>Hostname<input value={domain} onChange={(event) => setDomain(event.target.value)} placeholder="help.yourcompany.com" /></label><button className="button button--primary">Add domain</button></form><div className="dns-card"><span className="panel-label">HOW IT WORKS</span><ol><li>Add a verification TXT record at <code>_platform-verify.help.yourcompany.com</code>.</li><li>Point your hostname’s CNAME to <code>cname.vercel-dns.com</code>.</li><li>We verify the TXT record, then Vercel provisions and renews TLS.</li></ol><button className="text-button" onClick={() => onToast("DNS verification checks are ready")}>Check verification status</button></div></section>}
+      {tab === "widget" && <section><SettingsHeading kicker="WIDGET INSTALL" title="Install in under a minute." /><div className="setup-card"><span className="status-chip status-chip--met">Ready after deployment</span><p>Add this once just before the closing <code>&lt;/body&gt;</code> tag. It stores a visitor token locally so people can return to the same chat history.</p><pre>{`<script async\n  src="https://your-app.vercel.app/widget.js"\n  data-workspace="${workspacePublicId ?? "your-workspace-public-id"}">\n</script>`}</pre><button className="button button--secondary" onClick={() => { setCopied(true); onToast("Install script copied"); }}>{copied ? "Copied" : "Copy script"}</button></div></section>}
+      {tab === "domains" && <section><SettingsHeading kicker="CUSTOM DOMAIN" title="Your help center, on your domain." /><form className="domain-form" onSubmit={addDomain}><label>Hostname<input value={domain} onChange={(event) => setDomain(event.target.value)} placeholder="help.yourcompany.com" /></label><button className="button button--primary">Add domain</button></form><div className="dns-card"><span className="panel-label">HOW IT WORKS</span>{dnsInstructions.length ? <ol>{dnsInstructions.map((record) => <li key={`${record.type}-${record.host}`}><strong>{record.type}</strong> <code>{record.host}</code> → <code>{record.value}</code><br />{record.purpose}</li>)}</ol> : <ol><li>Add a verification TXT record at <code>_platform-verify.help.yourcompany.com</code>.</li><li>Point your hostname’s CNAME to <code>cname.vercel-dns.com</code>.</li><li>We verify the TXT record, then Vercel provisions and renews TLS.</li></ol>}<button className="text-button" onClick={() => onToast("DNS verification checks are ready")}>Check verification status</button></div></section>}
       {tab === "developers" && <section><SettingsHeading kicker="DEVELOPERS" title="Connect Intercom to the rest of your stack." /><div className="developer-grid"><div className="setup-card"><span className="panel-label">API TOKEN</span><h3>Production token</h3><p>Use a workspace-scoped Bearer token for programmatic conversation access.</p><button className="button button--secondary" onClick={() => onToast("A new API token can be created after credentials are connected")}>Create token</button></div><div className="setup-card"><span className="panel-label">WEBHOOKS</span><h3>Conversation events</h3><p>Deliver signed events with automatic retry and an inspectable delivery log.</p><label className="switch"><input type="checkbox" checked={webhookEnabled} onChange={(event) => { setWebhookEnabled(event.target.checked); onToast(`Webhook delivery ${event.target.checked ? "enabled" : "paused"}`); }} /><span /><b>{webhookEnabled ? "Enabled" : "Paused"}</b></label></div></div><div className="webhook-events"><span className="panel-label">SUBSCRIBED EVENTS</span><code>conversation.created</code><code>conversation.updated</code><code>message.created</code><button className="text-button" onClick={() => onToast("Webhook event picker opened")}>Manage events</button></div></section>}
     </div></div>
       {inviteOpen && <div className="modal-backdrop"><form className="invite-modal" onSubmit={invite}><header><div><span className="eyebrow">TEAM MEMBER</span><h2>Invite a teammate</h2></div><button type="button" className="modal-close" onClick={() => setInviteOpen(false)}>×</button></header><label>Email address<input name="email" type="email" placeholder="teammate@company.com" autoFocus /></label><label>Role<select name="role"><option>Agent</option><option>Admin</option></select></label><p>They will receive a secure, one-time link to join this workspace.</p><footer><button type="button" className="button button--secondary" onClick={() => setInviteOpen(false)}>Cancel</button><button className="button button--primary">Send invitation</button></footer></form></div>}
