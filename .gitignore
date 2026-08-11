@@ -14,4 +14,4 @@ dist/
 coverage/
 .vercel/
 *.log
-
+*.tsbuildinfo
