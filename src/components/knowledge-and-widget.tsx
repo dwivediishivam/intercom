@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type Notice = (message: string) => void;
 
@@ -80,13 +80,65 @@ export function KnowledgeSurface({ onToast }: { onToast: Notice }) {
   );
 }
 
-export function HelpCenterSurface({ onToast }: { onToast: Notice }) {
+type PublicCategory = { name: string; slug: string; sections?: Array<{ name: string; articles?: Array<{ id: string; title: string; slug: string; excerpt?: string | null }> }> };
+
+function flattenPublicCategories(categories: PublicCategory[]): Article[] {
+  return categories.flatMap((category) => (
+    (category.sections ?? []).flatMap((section) => (
+      (section.articles ?? []).map((article) => ({
+        id: article.id,
+        title: article.title,
+        excerpt: article.excerpt ?? "",
+        category: category.name,
+        section: section.name,
+        status: "Published" as const,
+        updated: "",
+      }))
+    ))
+  ));
+}
+
+export function HelpCenterSurface({ onToast, live = false }: { onToast: Notice; live?: boolean }) {
   const [query, setQuery] = useState("");
-  const articles = initialArticles.filter((article) => [article.title, article.excerpt, article.category].join(" ").toLowerCase().includes(query.toLowerCase()));
+  const [remoteArticles, setRemoteArticles] = useState<Article[]>([]);
+  const [remoteCategories, setRemoteCategories] = useState<PublicCategory[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!live) return;
+    let active = true;
+    const suffix = query.trim() ? `?query=${encodeURIComponent(query.trim())}` : "";
+    void fetch(`/api/public/knowledge${suffix}`)
+      .then(async (response) => {
+        const payload = await response.json() as { categories?: PublicCategory[]; articles?: Array<{ id: string; title: string; slug: string; excerpt?: string | null }>; error?: string };
+        if (!response.ok) throw new Error(payload.error ?? "Knowledge base could not be loaded.");
+        if (!active) return;
+        if (payload.categories) {
+          setRemoteCategories(payload.categories);
+          setRemoteArticles(flattenPublicCategories(payload.categories));
+        } else {
+          setRemoteArticles((payload.articles ?? []).map((article) => ({ id: article.id, title: article.title, excerpt: article.excerpt ?? "", category: "Help center", section: "Search result", status: "Published" as const, updated: "" })));
+        }
+      })
+      .catch((error: unknown) => { if (active) onToast(error instanceof Error ? error.message : "Knowledge base could not be loaded."); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [live, onToast, query]);
+
+  const articles = live
+    ? remoteArticles
+    : initialArticles.filter((article) => [article.title, article.excerpt, article.category].join(" ").toLowerCase().includes(query.toLowerCase()));
+  const topicItems = live
+    ? remoteCategories.map((category) => [category.name, category.sections?.[0]?.name ?? "Help articles", `${category.sections?.flatMap((section) => section.articles ?? []).length ?? 0} articles`])
+    : categories;
+  function updateQuery(nextQuery: string) {
+    if (live) setLoading(true);
+    setQuery(nextQuery);
+  }
   return (
     <section className="help-center" aria-label="Public help center preview">
-      <header className="help-center__hero"><div className="help-center__nav"><span className="help-center__brand"><i>i</i> Intercom</span><a href="#contact" onClick={(event) => { event.preventDefault(); onToast("Chat with support is ready from the widget") }}>Contact support</a></div><div className="help-center__intro"><span className="eyebrow">SUPPORT CENTER</span><h1>How can we help?</h1><label className="help-search"><span className="search-field__lens" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search for answers" aria-label="Search the help center" /></label></div></header>
-      <div className="help-center__body"><span className="eyebrow">BROWSE BY TOPIC</span><div className="help-topics">{categories.map(([name, section, count]) => <button key={name} onClick={() => setQuery(name)}><i>{name[0]}</i><strong>{name}</strong><span>{section} · {count}</span><b>→</b></button>)}</div><div className="help-results"><div><h2>{query ? "Search results" : "Popular answers"}</h2><span>{articles.length} article{articles.length === 1 ? "" : "s"}</span></div>{articles.map((article) => <button key={article.id} onClick={() => onToast(`${article.title} opened`)}><span>{article.category}</span><strong>{article.title}</strong><p>{article.excerpt}</p><b>Read article →</b></button>)}</div></div>
+      <header className="help-center__hero"><div className="help-center__nav"><span className="help-center__brand"><i>i</i> Intercom</span><a href="#contact" onClick={(event) => { event.preventDefault(); onToast("Chat with support is ready from the widget") }}>Contact support</a></div><div className="help-center__intro"><span className="eyebrow">SUPPORT CENTER</span><h1>How can we help?</h1><label className="help-search"><span className="search-field__lens" /><input value={query} onChange={(event) => updateQuery(event.target.value)} placeholder="Search for answers" aria-label="Search the help center" /></label></div></header>
+      <div className="help-center__body"><span className="eyebrow">BROWSE BY TOPIC</span><div className="help-topics">{topicItems.map(([name, section, count]) => <button key={name} onClick={() => updateQuery(name)}><i>{name[0]}</i><strong>{name}</strong><span>{section} · {count}</span><b>→</b></button>)}</div><div className="help-results"><div><h2>{query ? "Search results" : "Popular answers"}</h2><span>{loading ? "Searching…" : `${articles.length} article${articles.length === 1 ? "" : "s"}`}</span></div>{articles.map((article) => <button key={article.id} onClick={() => onToast(`${article.title} opened`)}><span>{article.category}</span><strong>{article.title}</strong><p>{article.excerpt}</p><b>Read article →</b></button>)}{live && !loading && articles.length === 0 && <p className="help-results__empty">There are no published articles here yet.</p>}</div></div>
       <footer className="help-center__footer"><span>Still need a hand?</span><button onClick={() => onToast("Open the widget at bottom-right to chat with us")}>Start a conversation</button></footer>
     </section>
   );
