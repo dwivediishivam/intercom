@@ -1,0 +1,17 @@
+# Secrets and machine-local configuration
+.env
+.env.*
+!.env.example
+Intercom_Keys.txt
+
+# Private source material; never commit or publish.
+assignment_details/
+
+# Build output and local tooling
+node_modules/
+.next/
+dist/
+coverage/
+.vercel/
+*.log
+
