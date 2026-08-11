@@ -2,6 +2,7 @@
 
 import { KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 
+import { ConversationWorkspace } from "@/components/conversation-workspace";
 import {
   type ConversationChannel,
   type ConversationStatus,
@@ -61,9 +62,11 @@ export function AppShell() {
   const [showEmpty, setShowEmpty] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
   const conversations = demoWorkspace.conversations;
+  const activeConversation = conversations.find((item) => item.id === activeConversationId) ?? null;
   const counts = useMemo(
     () => ({
       open: conversations.filter((item) => item.status === "open").length,
@@ -126,10 +129,14 @@ export function AppShell() {
     setToast(message);
   }
 
+  function openConversation(conversation: DemoConversation) {
+    setActiveConversationId(conversation.id);
+  }
+
   function handleRowKeyDown(event: KeyboardEvent<HTMLButtonElement>, conversation: DemoConversation) {
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
-      announce(`${conversation.subject} opened. Conversation workspace is next.`);
+      openConversation(conversation);
     }
   }
 
@@ -196,7 +203,15 @@ export function AppShell() {
           <button onClick={() => announce("Realtime notice dismissed")}>Dismiss</button>
         </div>
 
-        {screen === "inbox" ? (
+        {screen === "inbox" && activeConversation ? (
+          <ConversationWorkspace
+            conversation={activeConversation}
+            onBack={() => setActiveConversationId(null)}
+            onToast={announce}
+            onResolve={() => { announce(`${activeConversation.subject} resolved`); setActiveConversationId(null); }}
+            onSnooze={() => { announce(`${activeConversation.subject} snoozed until tomorrow, 09:00`); setActiveConversationId(null); }}
+          />
+        ) : screen === "inbox" ? (
           <section className="inbox" aria-label="Unified inbox">
             <header className="inbox__header">
               <div className="page-title-row">
@@ -287,7 +302,7 @@ export function AppShell() {
                     />
                     <span />
                   </label>
-                  <button className="conversation-row__main" onKeyDown={(event) => handleRowKeyDown(event, conversation)} onClick={() => announce(`${conversation.subject} opened. Conversation workspace is next.`)}>
+                  <button className="conversation-row__main" onKeyDown={(event) => handleRowKeyDown(event, conversation)} onClick={() => openConversation(conversation)}>
                     <span className={`avatar avatar--${conversation.avatarTone}`}>{conversation.initials}</span>
                     <span className="conversation-row__copy">
                       <span className="conversation-row__meta">
