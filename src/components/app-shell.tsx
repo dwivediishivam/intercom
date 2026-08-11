@@ -386,7 +386,7 @@ export function AppShell({
         ) : screen === "widget" ? (
           <WidgetDemoSurface onToast={announce} />
         ) : screen === "analytics" ? (
-          <AnalyticsSurface onToast={announce} />
+          <AnalyticsSurface onToast={announce} workspaceId={isDemo ? undefined : initialWorkspace.id} />
         ) : screen === "settings" ? (
           <SettingsSurface onToast={announce} />
         ) : (

@@ -1,6 +1,6 @@
 "use client";
 
-import { type FormEvent, type ReactNode, useState } from "react";
+import { type FormEvent, type ReactNode, useEffect, useState } from "react";
 
 type Notice = (message: string) => void;
 type SettingsTab = "team" | "workspace" | "email" | "widget" | "domains" | "developers";
@@ -13,16 +13,54 @@ const teamMembers = [
   { name: "Rohan Mehta", initials: "RM", role: "Agent", location: "New Delhi", tone: "sand" },
 ];
 
-export function AnalyticsSurface({ onToast }: { onToast: Notice }) {
+type LiveAnalytics = {
+  volume: number;
+  resolved: number;
+  averageFirstResponseSeconds: number | null;
+  averageResolutionSeconds: number | null;
+  busiestHours: Array<{ hour: number; conversations: number }>;
+  agentPerformance: Array<{ agentId: string; assigned: number; resolved: number; averageFirstResponseSeconds: number | null }>;
+};
+
+function formatDuration(seconds: number | null) {
+  if (seconds === null) return "—";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}
+
+export function AnalyticsSurface({ onToast, workspaceId }: { onToast: Notice; workspaceId?: string }) {
   const [range, setRange] = useState("Last 30 days");
+  const [liveAnalytics, setLiveAnalytics] = useState<LiveAnalytics | null>(null);
+  const rangeDays = range === "Last 7 days" ? 7 : range === "Last 90 days" ? 90 : 30;
+  useEffect(() => {
+    if (!workspaceId) return;
+    let active = true;
+    const to = new Date();
+    const from = new Date(to.getTime() - rangeDays * 24 * 60 * 60 * 1000);
+    void fetch(`/api/workspaces/${workspaceId}/analytics?from=${encodeURIComponent(from.toISOString())}&to=${encodeURIComponent(to.toISOString())}`)
+      .then(async (response) => {
+        const payload = await response.json() as LiveAnalytics & { error?: string };
+        if (!response.ok) throw new Error(payload.error ?? "Analytics could not be loaded.");
+        if (active) setLiveAnalytics(payload);
+      })
+      .catch((error: unknown) => { if (active) onToast(error instanceof Error ? error.message : "Analytics could not be loaded."); });
+    return () => { active = false; };
+  }, [onToast, rangeDays, workspaceId]);
+  const busiest = liveAnalytics?.busiestHours.slice(8, 20).map((item) => item.conversations) ?? analyticsBars;
+  const busiestMax = Math.max(...busiest, 1);
+  const resolutionRate = liveAnalytics?.volume ? `${Math.round((liveAnalytics.resolved / liveAnalytics.volume) * 100)}%` : "—";
+  const performance = liveAnalytics?.agentPerformance.length
+    ? liveAnalytics.agentPerformance.map((agent, index) => ({ name: `Agent ${agent.agentId.slice(0, 6)}`, initials: `${index + 1}`, assigned: agent.assigned, resolved: agent.resolved, firstReply: formatDuration(agent.averageFirstResponseSeconds), sla: agent.assigned ? `${Math.round((agent.resolved / agent.assigned) * 100)}%` : "—", tone: (["current", "sage", "sand"] as const)[index % 3] }))
+    : teamMembers.map((member, index) => ({ name: member.name, initials: member.initials, assigned: [218, 171, 129][index], resolved: [207, 160, 122][index], firstReply: ["7m 24s", "8m 57s", "10m 11s"][index], sla: ["97.2%", "95.8%", "92.9%"][index], tone: member.tone }));
   return (
     <section className="content-surface analytics-surface" aria-label="Analytics">
       <header className="content-header"><div><span className="eyebrow">ANALYTICS</span><h1>Make every reply count.</h1><p>Understand volume, speed, SLA health, and the support moments that need attention.</p></div><label className="date-select"><span>Date range</span><select value={range} onChange={(event) => { setRange(event.target.value); onToast(`Analytics updated for ${event.target.value.toLowerCase()}`); }}><option>Last 7 days</option><option>Last 30 days</option><option>Last 90 days</option></select></label></header>
       <div className="analytics-body">
-        <div className="metric-grid"><Metric label="Conversations" value="1,284" change="↑ 12.6%" good /><Metric label="First response" value="8m 42s" change="↓ 1m 18s" good /><Metric label="Resolution time" value="4h 18m" change="↓ 9.4%" good /><Metric label="SLA attained" value="94.8%" change="2 breaches" /></div>
-        <div className="analytics-grid"><section className="analytics-card analytics-card--wide"><header><div><span className="panel-label">CONVERSATION VOLUME</span><h2>Steady, with a mid-week peak.</h2></div><span className="legend"><i /> All conversations</span></header><div className="bar-chart" aria-label="Conversation volume chart">{analyticsBars.map((height, index) => <div key={index}><span style={{ height: `${height}%` }} /><small>{index % 2 ? "" : `${index + 1} Aug`}</small></div>)}</div></section><section className="analytics-card"><header><div><span className="panel-label">BY CHANNEL</span><h2>Where customers start.</h2></div></header><div className="channel-breakdown"><div><i className="channel-breakdown__chat" /><span>Live chat</span><strong>68%</strong></div><div><i className="channel-breakdown__email" /><span>Email</span><strong>32%</strong></div></div><div className="donut" aria-label="68 percent chat and 32 percent email"><span>1,284<small>conversations</small></span></div></section></div>
-        <div className="analytics-grid"><section className="analytics-card"><header><div><span className="panel-label">BUSIEST HOURS</span><h2>Plan coverage around 11:00.</h2></div></header><div className="hour-strip">{[12, 20, 31, 46, 74, 92, 86, 64, 39, 25, 17, 9].map((height, index) => <span key={index} style={{ height: `${height}%` }} title={`${index + 8}:00`} />)}</div><div className="hour-strip__labels"><span>08:00</span><span>12:00</span><span>16:00</span><span>19:00</span></div></section><section className="analytics-card"><header><div><span className="panel-label">SLA HEALTH</span><h2>Most conversations stay on track.</h2></div></header><div className="sla-progress"><div><span>Met</span><strong>94.8%</strong><i><b style={{ width: "94.8%" }} /></i></div><div><span>At risk</span><strong>3.7%</strong><i><b style={{ width: "3.7%" }} /></i></div><div><span>Breached</span><strong>1.5%</strong><i><b style={{ width: "1.5%" }} /></i></div></div></section></div>
-        <section className="analytics-card performance-card"><header><div><span className="panel-label">AGENT PERFORMANCE</span><h2>Clear signals, not surveillance.</h2></div><button className="text-button" onClick={() => onToast("CSV export prepared")}>Export CSV</button></header><div className="performance-table"><div className="performance-table__head"><span>AGENT</span><span>ASSIGNED</span><span>RESOLVED</span><span>FIRST REPLY</span><span>SLA</span></div>{teamMembers.map((member, index) => <div className="performance-table__row" key={member.name}><span><i className={`avatar avatar--${member.tone}`}>{member.initials}</i><strong>{member.name}</strong></span><span>{[218, 171, 129][index]}</span><span>{[207, 160, 122][index]}</span><span>{["7m 24s", "8m 57s", "10m 11s"][index]}</span><span className="status-chip status-chip--met">{["97.2%", "95.8%", "92.9%"][index]}</span></div>)}</div></section>
+        <div className="metric-grid"><Metric label="Conversations" value={liveAnalytics ? String(liveAnalytics.volume) : "1,284"} change={liveAnalytics ? `${range} selected` : "↑ 12.6%"} good /><Metric label="First response" value={liveAnalytics ? formatDuration(liveAnalytics.averageFirstResponseSeconds) : "8m 42s"} change={liveAnalytics ? "Actual response average" : "↓ 1m 18s"} good /><Metric label="Resolution time" value={liveAnalytics ? formatDuration(liveAnalytics.averageResolutionSeconds) : "4h 18m"} change={liveAnalytics ? "Actual resolution average" : "↓ 9.4%"} good /><Metric label="Resolved" value={liveAnalytics ? resolutionRate : "94.8%"} change={liveAnalytics ? `${liveAnalytics.resolved} conversations` : "2 breaches"} /></div>
+        <div className="analytics-grid"><section className="analytics-card analytics-card--wide"><header><div><span className="panel-label">CONVERSATION VOLUME</span><h2>{liveAnalytics ? "Your busiest hours at a glance." : "Steady, with a mid-week peak."}</h2></div><span className="legend"><i /> All conversations</span></header><div className="bar-chart" aria-label="Conversation volume chart">{busiest.map((value, index) => <div key={index}><span style={{ height: `${Math.max(4, (value / busiestMax) * 100)}%` }} /><small>{index % 2 ? "" : `${index + 8}:00`}</small></div>)}</div></section><section className="analytics-card"><header><div><span className="panel-label">BY CHANNEL</span><h2>Where customers start.</h2></div></header><div className="channel-breakdown"><div><i className="channel-breakdown__chat" /><span>Live chat</span><strong>68%</strong></div><div><i className="channel-breakdown__email" /><span>Email</span><strong>32%</strong></div></div><div className="donut" aria-label="68 percent chat and 32 percent email"><span>{liveAnalytics ? liveAnalytics.volume : "1,284"}<small>conversations</small></span></div></section></div>
+        <div className="analytics-grid"><section className="analytics-card"><header><div><span className="panel-label">BUSIEST HOURS</span><h2>Plan coverage around 11:00.</h2></div></header><div className="hour-strip">{busiest.map((value, index) => <span key={index} style={{ height: `${Math.max(4, (value / busiestMax) * 100)}%` }} title={`${index + 8}:00`} />)}</div><div className="hour-strip__labels"><span>08:00</span><span>12:00</span><span>16:00</span><span>19:00</span></div></section><section className="analytics-card"><header><div><span className="panel-label">SLA HEALTH</span><h2>Most conversations stay on track.</h2></div></header><div className="sla-progress"><div><span>Met</span><strong>94.8%</strong><i><b style={{ width: "94.8%" }} /></i></div><div><span>At risk</span><strong>3.7%</strong><i><b style={{ width: "3.7%" }} /></i></div><div><span>Breached</span><strong>1.5%</strong><i><b style={{ width: "1.5%" }} /></i></div></div></section></div>
+        <section className="analytics-card performance-card"><header><div><span className="panel-label">AGENT PERFORMANCE</span><h2>Clear signals, not surveillance.</h2></div><button className="text-button" onClick={() => onToast("CSV export prepared")}>Export CSV</button></header><div className="performance-table"><div className="performance-table__head"><span>AGENT</span><span>ASSIGNED</span><span>RESOLVED</span><span>FIRST REPLY</span><span>SLA</span></div>{performance.map((member) => <div className="performance-table__row" key={member.name}><span><i className={`avatar avatar--${member.tone}`}>{member.initials}</i><strong>{member.name}</strong></span><span>{member.assigned}</span><span>{member.resolved}</span><span>{member.firstReply}</span><span className="status-chip status-chip--met">{member.sla}</span></div>)}</div></section>
       </div>
     </section>
   );
