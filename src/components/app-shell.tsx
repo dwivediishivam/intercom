@@ -380,7 +380,7 @@ export function AppShell({
             </div>
           </section>
         ) : screen === "knowledge" ? (
-          <KnowledgeSurface onToast={announce} />
+          <KnowledgeSurface onToast={announce} workspaceId={isDemo ? undefined : initialWorkspace.id} />
         ) : screen === "help" ? (
           <HelpCenterSurface onToast={announce} />
         ) : screen === "widget" ? (

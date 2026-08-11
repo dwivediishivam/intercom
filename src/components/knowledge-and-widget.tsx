@@ -6,6 +6,7 @@ type Notice = (message: string) => void;
 
 type Article = {
   id: string;
+  sectionId?: string;
   title: string;
   excerpt: string;
   category: string;
@@ -27,50 +28,126 @@ const categories = [
   ["Security", "Access and identity", "1 article"],
 ];
 
-export function KnowledgeSurface({ onToast }: { onToast: Notice }) {
-  const [articles, setArticles] = useState(initialArticles);
+type KnowledgeSnapshot = {
+  categories: Array<{ id: string; name: string }>;
+  sections: Array<{ id: string; category_id: string; name: string }>;
+  articles: Array<{ id: string; section_id: string; title: string; excerpt: string | null; content_html: string; status: "draft" | "published" | "archived"; updated_at: string }>;
+};
+
+function articleSlug(title: string) {
+  return title.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "").slice(0, 120) || "article";
+}
+
+function escapeHtml(value: string) {
+  return value.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character] ?? character);
+}
+
+export function KnowledgeSurface({ onToast, workspaceId }: { onToast: Notice; workspaceId?: string }) {
+  const isLive = Boolean(workspaceId);
+  const [articles, setArticles] = useState<Article[]>(() => isLive ? [] : initialArticles);
+  const [collections, setCollections] = useState<KnowledgeSnapshot["categories"]>([]);
+  const [sections, setSections] = useState<KnowledgeSnapshot["sections"]>([]);
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<"All" | Article["status"]>("All");
   const [editorOpen, setEditorOpen] = useState(false);
   const [draftTitle, setDraftTitle] = useState("");
   const [draftBody, setDraftBody] = useState("");
+  const [editingArticleId, setEditingArticleId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!workspaceId) return;
+    let active = true;
+    void fetch(`/api/workspaces/${workspaceId}/knowledge`)
+      .then(async (response) => {
+        const payload = await response.json() as KnowledgeSnapshot & { error?: string };
+        if (!response.ok) throw new Error(payload.error ?? "Knowledge base could not be loaded.");
+        if (!active) return;
+        const categoryById = new Map(payload.categories.map((category) => [category.id, category.name]));
+        const sectionById = new Map(payload.sections.map((section) => [section.id, section]));
+        setCollections(payload.categories);
+        setSections(payload.sections);
+        setArticles(payload.articles.filter((article) => article.status !== "archived").map((article) => {
+          const section = sectionById.get(article.section_id);
+          return {
+            id: article.id,
+            sectionId: article.section_id,
+            title: article.title,
+            excerpt: article.excerpt ?? "",
+            category: section ? categoryById.get(section.category_id) ?? "Knowledge base" : "Knowledge base",
+            section: section?.name ?? "Unsorted",
+            status: article.status === "published" ? "Published" : "Draft",
+            updated: new Date(article.updated_at).toLocaleDateString([], { month: "short", day: "numeric" }),
+          };
+        }));
+      })
+      .catch((error: unknown) => { if (active) onToast(error instanceof Error ? error.message : "Knowledge base could not be loaded."); });
+    return () => { active = false; };
+  }, [onToast, workspaceId]);
 
   const filtered = useMemo(() => articles.filter((article) => (
     (status === "All" || article.status === status) &&
     [article.title, article.excerpt, article.category].join(" ").toLowerCase().includes(query.toLowerCase())
   )), [articles, query, status]);
 
-  function publishArticle() {
+  async function publishArticle() {
     const title = draftTitle.trim();
     if (!title) {
       onToast("Add a title before publishing");
       return;
     }
-    setArticles((current) => [{ id: `kb-${Date.now()}`, title, excerpt: draftBody.trim() || "A new help article for your customers.", category: "Getting started", section: "Workspace basics", status: "Published", updated: "Just now" }, ...current]);
-    setDraftTitle("");
-    setDraftBody("");
-    setEditorOpen(false);
-    onToast("Article published to your help center");
+    if (!isLive) {
+      setArticles((current) => [{ id: `kb-${Date.now()}`, title, excerpt: draftBody.trim() || "A new help article for your customers.", category: "Getting started", section: "Workspace basics", status: "Published", updated: "Just now" }, ...current]);
+      setDraftTitle("");
+      setDraftBody("");
+      setEditorOpen(false);
+      onToast("Article published to your help center");
+      return;
+    }
+    const sectionId = editingArticleId ? articles.find((article) => article.id === editingArticleId)?.sectionId : sections[0]?.id;
+    if (!sectionId || !workspaceId) { onToast("Create a category and section before publishing an article."); return; }
+    try {
+      const body = draftBody.trim() || "A new help article for your customers.";
+      const payload = { sectionId, title, slug: articleSlug(title), excerpt: body.slice(0, 600), contentJson: { type: "doc", content: [] }, contentHtml: `<p>${escapeHtml(body).replace(/\n/g, "<br />")}</p>`, status: "published" };
+      const response = await fetch(editingArticleId ? `/api/workspaces/${workspaceId}/knowledge/articles/${editingArticleId}` : `/api/workspaces/${workspaceId}/knowledge/articles`, { method: editingArticleId ? "PUT" : "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
+      const result = await response.json() as { article?: { id: string; section_id: string; title: string; excerpt: string | null; status: "published" | "draft"; updated_at: string }; error?: string };
+      if (!response.ok || !result.article) throw new Error(result.error ?? "Article could not be published.");
+      const section = sections.find((item) => item.id === result.article?.section_id);
+      const category = collections.find((item) => item.id === section?.category_id);
+      const saved: Article = { id: result.article.id, sectionId: result.article.section_id, title: result.article.title, excerpt: result.article.excerpt ?? body.slice(0, 600), category: category?.name ?? "Knowledge base", section: section?.name ?? "Unsorted", status: result.article.status === "published" ? "Published" : "Draft", updated: "Just now" };
+      setArticles((current) => editingArticleId ? current.map((article) => article.id === editingArticleId ? saved : article) : [saved, ...current]);
+      setDraftTitle(""); setDraftBody(""); setEditingArticleId(null); setEditorOpen(false);
+      onToast("Article published to your help center");
+    } catch (error) {
+      onToast(error instanceof Error ? error.message : "Article could not be published.");
+    }
   }
+
+  const collectionItems = isLive
+    ? collections.map((category) => {
+      const categorySections = sections.filter((section) => section.category_id === category.id);
+      const count = articles.filter((article) => categorySections.some((section) => section.id === article.sectionId)).length;
+      return [category.name, categorySections[0]?.name ?? "No section", `${count} article${count === 1 ? "" : "s"}`];
+    })
+    : categories;
 
   return (
     <section className="content-surface knowledge-surface" aria-label="Knowledge base management">
       <header className="content-header">
         <div><span className="eyebrow">KNOWLEDGE BASE</span><h1>Help your customers help themselves.</h1><p>Publish clear answers, organise them into sections, and let the chat widget suggest the right one before a ticket starts.</p></div>
-        <button className="button button--primary" onClick={() => setEditorOpen(true)}>Create article</button>
+        <button className="button button--primary" onClick={() => { setEditingArticleId(null); setDraftTitle(""); setDraftBody(""); setEditorOpen(true); }}>Create article</button>
       </header>
 
       <div className="knowledge-layout">
         <aside className="knowledge-tree">
           <div className="panel-caption"><span>COLLECTION</span><button onClick={() => onToast("Category editor opened")}>Manage</button></div>
-          {categories.map(([category, section, count]) => <div className="knowledge-tree__item" key={category}><strong>{category}</strong><span>{section}</span><small>{count}</small></div>)}
+          {collectionItems.map(([category, section, count]) => <div className="knowledge-tree__item" key={category}><strong>{category}</strong><span>{section}</span><small>{count}</small></div>)}
           <button className="add-link" onClick={() => onToast("New category form opened")}>+ Add category</button>
         </aside>
         <div className="knowledge-content">
           <div className="knowledge-content__tools"><label className="search-field"><span className="search-field__lens" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search articles" aria-label="Search articles" /></label><div className="compact-tabs">{(["All", "Published", "Draft"] as const).map((item) => <button className={status === item ? "compact-tabs__active" : ""} key={item} onClick={() => setStatus(item)}>{item}</button>)}</div></div>
           <div className="article-table" role="table" aria-label="Knowledge base articles">
             <div className="article-table__head" role="row"><span>ARTICLE</span><span>SECTION</span><span>STATUS</span><span>UPDATED</span></div>
-            {filtered.map((article) => <button className="article-table__row" role="row" key={article.id} onClick={() => { setDraftTitle(article.title); setDraftBody(article.excerpt); setEditorOpen(true); }}><span><strong>{article.title}</strong><small>{article.excerpt}</small></span><span>{article.category}<small>{article.section}</small></span><span><i className={article.status === "Published" ? "article-status article-status--published" : "article-status"}>{article.status}</i></span><time>{article.updated}</time></button>)}
+            {filtered.map((article) => <button className="article-table__row" role="row" key={article.id} onClick={() => { setEditingArticleId(article.id); setDraftTitle(article.title); setDraftBody(article.excerpt); setEditorOpen(true); }}><span><strong>{article.title}</strong><small>{article.excerpt}</small></span><span>{article.category}<small>{article.section}</small></span><span><i className={article.status === "Published" ? "article-status article-status--published" : "article-status"}>{article.status}</i></span><time>{article.updated}</time></button>)}
           </div>
         </div>
       </div>
