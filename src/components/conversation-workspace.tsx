@@ -82,7 +82,7 @@ type Props = {
   isDemo: boolean;
   workspaceId?: string;
   workspaceMembers: WorkspaceMember[];
-  currentUser: { name: string; initials: string; role: string };
+  currentUser: { id: string; name: string; initials: string; role: string };
   onAssign: (assigneeId: string | null) => Promise<boolean>;
 };
 

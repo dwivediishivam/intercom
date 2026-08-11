@@ -23,7 +23,7 @@ type WorkspaceView = {
   slug: string;
   appUrl?: string | null;
   inboundEmailDomain?: string | null;
-  currentUser: { name: string; initials: string; role: string; location: string };
+  currentUser: { id: string; name: string; initials: string; role: string; location: string };
   members: Array<{ id: string; name: string; initials: string; role: string; location: string; tone: "current" | "sage" | "sand" | "peach" }>;
 };
 
@@ -201,6 +201,31 @@ export function AppShell({
     return true;
   }
 
+  async function applyBulkAction(action: "assign" | "snooze" | "resolve") {
+    if (!selected.length) return;
+    const actionPayload = action === "assign"
+      ? { action: "assign" as const, assigneeId: initialWorkspace.currentUser.id }
+      : action === "snooze"
+        ? { action: "snooze" as const, until: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() }
+        : { action: "resolve" as const };
+    try {
+      if (!isDemo) {
+        const results = await Promise.all(selected.map(async (conversationId) => {
+          const response = await fetch(`/api/conversations/${conversationId}/actions`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(actionPayload) });
+          const payload = await response.json() as { error?: string };
+          if (!response.ok) throw new Error(payload.error ?? "A conversation could not be updated.");
+        }));
+        void results;
+      }
+      setConversations((current) => current.map((item) => !selected.includes(item.id) ? item : action === "assign"
+        ? { ...item, assigneeId: initialWorkspace.currentUser.id, assignee: { name: initialWorkspace.currentUser.name, initials: initialWorkspace.currentUser.initials, tone: "terracotta" } }
+        : { ...item, status: action === "resolve" ? "resolved" : "snoozed", unread: false }));
+      const label = action === "assign" ? `assigned to ${initialWorkspace.currentUser.name}` : action === "resolve" ? "resolved" : "snoozed until tomorrow";
+      announce(`${selected.length} conversation${selected.length === 1 ? "" : "s"} ${label}.`);
+      setSelected([]);
+    } catch (error) { announce(error instanceof Error ? error.message : "Conversations could not be updated."); }
+  }
+
   function openConversation(conversation: DemoConversation) {
     setActiveConversationId(conversation.id);
   }
@@ -306,7 +331,7 @@ export function AppShell({
                   {isDemo && <button className="button button--secondary" onClick={() => setShowEmpty((current) => !current)}>
                     {showEmpty ? "Show conversations" : "Preview empty state"}
                   </button>}
-                  {!isDemo && <button className="button button--primary" onClick={() => announce("New customer conversations will appear here as chat or email arrives.")}>Channel setup</button>}
+                  {!isDemo && <button className="button button--primary" onClick={() => changeScreen("settings")}>Channel setup</button>}
                 </div>
               </div>
 
@@ -363,9 +388,9 @@ export function AppShell({
             {selected.length > 0 && (
               <div className="bulk-toolbar" role="status">
                 <strong>{selected.length} selected</strong>
-                <button onClick={() => announce(`${selected.length} conversations selected. Open one to assign it to a teammate.`)}>Assign to me</button>
-                <button onClick={() => announce(`${selected.length} conversations snoozed until tomorrow 09:00`)}>Snooze</button>
-                <button onClick={() => { announce(`${selected.length} conversations resolved`); setSelected([]); }}>Resolve</button>
+                <button onClick={() => void applyBulkAction("assign")}>Assign to me</button>
+                <button onClick={() => void applyBulkAction("snooze")}>Snooze</button>
+                <button onClick={() => void applyBulkAction("resolve")}>Resolve</button>
                 <button className="bulk-toolbar__clear" onClick={() => setSelected([])}>Clear</button>
               </div>
             )}
