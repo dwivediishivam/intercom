@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { AppShell } from "@/components/app-shell";
 import type { DemoConversation } from "@/lib/demo-data";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { sendWelcomeEmailIfNeeded } from "@/lib/welcome-email";
 
 export const dynamic = "force-dynamic";
 
@@ -27,6 +28,18 @@ async function getWorkspaceView() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { kind: "unauthenticated" as const };
 
+    const { data: profile } = await supabase.from("profiles").select("full_name, timezone").eq("id", user.id).maybeSingle();
+    try {
+      await sendWelcomeEmailIfNeeded({
+        userId: user.id,
+        email: user.email,
+        fullName: profile?.full_name || user.user_metadata.full_name || user.user_metadata.name,
+      });
+    } catch (welcomeError) {
+      // Welcome delivery should never block authentication or workspace setup.
+      console.error("Unable to send welcome email", welcomeError);
+    }
+
     const { data: membership, error: membershipError } = await supabase
       .from("workspace_members")
       .select("workspace_id, role, workspaces(id, public_id, name, slug)")
@@ -38,10 +51,12 @@ async function getWorkspaceView() {
 
     const workspace = membership.workspaces as unknown as WorkspaceRow | null;
     if (!workspace) return { kind: "onboarding" as const };
-    const [{ data: profile }, { data: conversations, error: conversationsError }] = await Promise.all([
-      supabase.from("profiles").select("full_name, timezone").eq("id", user.id).maybeSingle(),
-      supabase.from("conversations").select("id, contact_id, channel, status, subject, assignee_id, priority, last_message_at, last_message_preview").eq("workspace_id", workspace.id).order("last_message_at", { ascending: false, nullsFirst: false }).limit(100),
-    ]);
+    const { data: conversations, error: conversationsError } = await supabase
+      .from("conversations")
+      .select("id, contact_id, channel, status, subject, assignee_id, priority, last_message_at, last_message_preview")
+      .eq("workspace_id", workspace.id)
+      .order("last_message_at", { ascending: false, nullsFirst: false })
+      .limit(100);
     if (conversationsError) throw conversationsError;
 
     const contactIds = [...new Set((conversations ?? []).map((conversation) => conversation.contact_id))];
