@@ -6,6 +6,9 @@ type Notice = (message: string) => void;
 type SettingsTab = "team" | "workspace" | "email" | "widget" | "domains" | "developers";
 
 type WorkspaceMember = { id: string; name: string; initials: string; role: string; location: string; tone: "current" | "sage" | "sand" | "peach" };
+type WorkspaceDomain = { id: string; hostname: string; status: string; verification_checked_at: string | null; failure_reason: string | null };
+type ApiToken = { id: string; name: string; token_prefix: string; scopes: string[]; last_used_at: string | null; revoked_at: string | null; created_at: string };
+type WebhookSubscription = { id: string; url: string; event_types: string[]; active: boolean; created_at: string };
 
 type LiveAnalytics = {
   volume: number;
@@ -64,26 +67,42 @@ function Metric({ label, value, change, good = false }: { label: string; value: 
   return <section className="metric-card"><span>{label}</span><strong>{value}</strong><small className={good ? "metric-card__good" : ""}>{change}</small></section>;
 }
 
-export function SettingsSurface({ onToast, workspaceId, workspacePublicId, workspaceName = "Workspace", workspaceSlug = "workspace", members = [] }: { onToast: Notice; workspaceId?: string; workspacePublicId?: string; workspaceName?: string; workspaceSlug?: string; members?: WorkspaceMember[] }) {
+export function SettingsSurface({ onToast, workspaceId, workspacePublicId, workspaceName = "Workspace", workspaceSlug = "workspace", appUrl, inboundEmailDomain, members = [] }: { onToast: Notice; workspaceId?: string; workspacePublicId?: string; workspaceName?: string; workspaceSlug?: string; appUrl?: string | null; inboundEmailDomain?: string | null; members?: WorkspaceMember[] }) {
   const [tab, setTab] = useState<SettingsTab>("team");
   const [domain, setDomain] = useState("");
   const [team, setTeam] = useState<WorkspaceMember[]>(members);
   const [inviteOpen, setInviteOpen] = useState(false);
-  const [webhookEnabled, setWebhookEnabled] = useState(true);
   const [copied, setCopied] = useState(false);
   const [dnsInstructions, setDnsInstructions] = useState<Array<{ type: string; host: string; value: string; purpose: string }>>([]);
   const [widgetOrigins, setWidgetOrigins] = useState<string[]>([]);
   const [originDraft, setOriginDraft] = useState("");
+  const [domains, setDomains] = useState<WorkspaceDomain[]>([]);
+  const [apiTokens, setApiTokens] = useState<ApiToken[]>([]);
+  const [createdToken, setCreatedToken] = useState<string | null>(null);
+  const [tokenName, setTokenName] = useState("");
+  const [webhooks, setWebhooks] = useState<WebhookSubscription[]>([]);
+  const [webhookUrl, setWebhookUrl] = useState("");
+  const [cannedTitle, setCannedTitle] = useState("");
+  const [cannedBody, setCannedBody] = useState("");
   const content = { team: "Team", workspace: "Workspace", email: "Email channel", widget: "Widget install", domains: "Custom domain", developers: "Developers" };
   useEffect(() => {
     if (!workspaceId) return;
     let active = true;
-    void fetch(`/api/workspaces/${workspaceId}/widget-origins`)
-      .then(async (response) => {
-        const payload = await response.json() as { origins?: string[] };
-        if (response.ok && active) setWidgetOrigins(payload.origins ?? []);
-      })
-      .catch(() => undefined);
+    void Promise.all([
+      fetch(`/api/workspaces/${workspaceId}/widget-origins`).then(async (response) => ({ kind: "origins" as const, response, payload: await response.json() as { origins?: string[] } })),
+      fetch(`/api/workspaces/${workspaceId}/domains`).then(async (response) => ({ kind: "domains" as const, response, payload: await response.json() as { domains?: WorkspaceDomain[] } })),
+      fetch(`/api/workspaces/${workspaceId}/api-tokens`).then(async (response) => ({ kind: "tokens" as const, response, payload: await response.json() as { apiTokens?: ApiToken[] } })),
+      fetch(`/api/workspaces/${workspaceId}/webhooks`).then(async (response) => ({ kind: "webhooks" as const, response, payload: await response.json() as { subscriptions?: WebhookSubscription[] } })),
+    ]).then((results) => {
+      if (!active) return;
+      for (const result of results) {
+        if (!result.response.ok) continue;
+        if (result.kind === "origins") setWidgetOrigins(result.payload.origins ?? []);
+        if (result.kind === "domains") setDomains(result.payload.domains ?? []);
+        if (result.kind === "tokens") setApiTokens(result.payload.apiTokens ?? []);
+        if (result.kind === "webhooks") setWebhooks(result.payload.subscriptions ?? []);
+      }
+    }).catch(() => undefined);
     return () => { active = false; };
   }, [workspaceId]);
   async function invite(event: FormEvent<HTMLFormElement>) {
@@ -109,12 +128,14 @@ export function SettingsSurface({ onToast, workspaceId, workspacePublicId, works
     if (workspaceId) {
       try {
         const response = await fetch(`/api/workspaces/${workspaceId}/domains`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ hostname: domain }) });
-        const payload = await response.json() as { dns?: { records?: Array<{ type: string; host: string; value: string; purpose: string }> }; error?: string };
+        const payload = await response.json() as { domain?: WorkspaceDomain; dns?: { records?: Array<{ type: string; host: string; value: string; purpose: string }> }; error?: string };
         if (!response.ok || !payload.dns?.records) throw new Error(payload.error ?? "Domain could not be added.");
         setDnsInstructions(payload.dns.records);
+        if (payload.domain) setDomains((current) => [payload.domain!, ...current]);
       } catch (error) { onToast(error instanceof Error ? error.message : "Domain could not be added."); return; }
     }
     onToast(`DNS instructions created for ${domain}`);
+    setDomain("");
   }
   async function addWidgetOrigin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -144,14 +165,70 @@ export function SettingsSurface({ onToast, workspaceId, workspacePublicId, works
     } else setWidgetOrigins(nextOrigins);
     onToast("Approved widget origin removed");
   }
+  async function updateMemberRole(member: WorkspaceMember, role: string) {
+    if (!workspaceId || member.id.startsWith("pending-")) return;
+    try {
+      const response = await fetch(`/api/workspaces/${workspaceId}/members/${member.id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ role: role.toLowerCase() }) });
+      const payload = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(payload.error ?? "Member role could not be changed.");
+      setTeam((current) => current.map((item) => item.id === member.id ? { ...item, role } : item));
+      onToast(`${member.name} is now an ${role}.`);
+    } catch (error) { onToast(error instanceof Error ? error.message : "Member role could not be changed."); }
+  }
+  async function verifyDomain(domainToVerify: WorkspaceDomain) {
+    if (!workspaceId) return;
+    try {
+      const response = await fetch(`/api/workspaces/${workspaceId}/domains/${domainToVerify.id}/verify`, { method: "POST" });
+      const payload = await response.json() as { verified?: boolean; domain?: WorkspaceDomain; reason?: string; error?: string };
+      if (!response.ok) throw new Error(payload.error ?? "Domain verification could not run.");
+      if (payload.domain) setDomains((current) => current.map((item) => item.id === payload.domain?.id ? { ...item, ...payload.domain } : item));
+      onToast(payload.verified ? `${domainToVerify.hostname} is verified.` : payload.reason ?? "DNS verification is still pending.");
+    } catch (error) { onToast(error instanceof Error ? error.message : "Domain verification could not run."); }
+  }
+  async function createToken(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!workspaceId || !tokenName.trim()) { onToast("Name the token before creating it."); return; }
+    try {
+      const response = await fetch(`/api/workspaces/${workspaceId}/api-tokens`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: tokenName.trim(), scopes: ["conversations:read", "conversations:write"] }) });
+      const payload = await response.json() as { apiToken?: ApiToken; token?: string; error?: string };
+      if (!response.ok || !payload.apiToken || !payload.token) throw new Error(payload.error ?? "API token could not be created.");
+      setApiTokens((current) => [payload.apiToken!, ...current]);
+      setCreatedToken(payload.token);
+      setTokenName("");
+      onToast("API token created. Copy it now; it will not be shown again.");
+    } catch (error) { onToast(error instanceof Error ? error.message : "API token could not be created."); }
+  }
+  async function createWebhook(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!workspaceId) return;
+    try {
+      const response = await fetch(`/api/workspaces/${workspaceId}/webhooks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url: webhookUrl, eventTypes: ["conversation.created", "conversation.updated", "message.created"] }) });
+      const payload = await response.json() as { subscription?: WebhookSubscription; error?: string };
+      if (!response.ok || !payload.subscription) throw new Error(payload.error ?? "Webhook could not be saved.");
+      setWebhooks((current) => [payload.subscription!, ...current]);
+      setWebhookUrl("");
+      onToast("Webhook subscription created.");
+    } catch (error) { onToast(error instanceof Error ? error.message : "Webhook could not be saved."); }
+  }
+  async function createCannedResponse(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!workspaceId || !cannedTitle.trim() || !cannedBody.trim()) { onToast("Add a title and response text first."); return; }
+    try {
+      const response = await fetch(`/api/workspaces/${workspaceId}/canned-responses`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: cannedTitle.trim(), body: cannedBody.trim(), tags: ["General"] }) });
+      const payload = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(payload.error ?? "Canned response could not be saved.");
+      setCannedTitle(""); setCannedBody("");
+      onToast("Canned response saved. It is available in every conversation composer.");
+    } catch (error) { onToast(error instanceof Error ? error.message : "Canned response could not be saved."); }
+  }
   return (
     <section className="content-surface settings-surface" aria-label="Workspace settings"><header className="content-header"><div><span className="eyebrow">SETTINGS</span><h1>Make the workspace yours.</h1><p>Set up access, communication channels, customer-facing domains, and developer integrations.</p></div></header><div className="settings-layout"><nav className="settings-tabs" aria-label="Settings sections">{(Object.keys(content) as SettingsTab[]).map((key) => <button key={key} className={tab === key ? "settings-tabs__active" : ""} onClick={() => setTab(key)}>{content[key]}</button>)}</nav><div className="settings-panel">
-      {tab === "team" && <section><SettingsHeading kicker="PEOPLE AND ACCESS" title="A small team with clear ownership." action={<button className="button button--primary" onClick={() => setInviteOpen(true)}>Invite teammate</button>} /><div className="member-list">{team.length ? team.map((member) => <div key={member.id}><i className={`avatar avatar--${member.tone}`}>{member.initials}</i><span><strong>{member.name}</strong><small>{member.location}</small></span><b>{member.role}</b><button onClick={() => onToast(`${member.name}'s role can be changed by an Admin.`)}>Manage</button></div>) : <p className="settings-note">Your first teammate will appear here after they accept an invitation.</p>}</div><p className="settings-note">Admins can invite people, change workspace settings, and manage developer credentials. Agents can work with customer conversations.</p></section>}
+      {tab === "team" && <section><SettingsHeading kicker="PEOPLE AND ACCESS" title="A small team with clear ownership." action={<button className="button button--primary" onClick={() => setInviteOpen(true)}>Invite teammate</button>} /><div className="member-list">{team.length ? team.map((member) => <div key={member.id}><i className={`avatar avatar--${member.tone}`}>{member.initials}</i><span><strong>{member.name}</strong><small>{member.location}</small></span><select aria-label={`Role for ${member.name}`} value={member.role} disabled={member.id.startsWith("pending-")} onChange={(event) => void updateMemberRole(member, event.target.value)}><option>Admin</option><option>Agent</option></select></div>) : <p className="settings-note">Your first teammate will appear here after they accept an invitation.</p>}</div><p className="settings-note">Admins can invite people, change workspace settings, and manage developer credentials. Agents can work with customer conversations.</p></section>}
       {tab === "workspace" && <section><SettingsHeading kicker="WORKSPACE" title={workspaceName} /><div className="setup-card"><span className="panel-label">WORKSPACE IDENTITY</span><h3>{workspaceName}</h3><p>Your workspace slug is <code>{workspaceSlug}</code>. It provides the default email alias for your inbound support channel.</p></div></section>}
-      {tab === "email" && <section><SettingsHeading kicker="EMAIL CHANNEL" title="A normal email in. A normal email out." /><div className="setup-card"><span className="status-chip status-chip--met">Provider connected</span><h3>{workspaceSlug}@your-inbound-domain</h3><p>Incoming email becomes a threaded conversation. Dashboard replies preserve Message-ID headers and send the workspace alias as Reply-To.</p><ol><li>Send a test email to your configured Resend receiving address using this workspace slug.</li><li>Watch it arrive in the unified inbox.</li><li>Reply from the dashboard and confirm the normal email thread.</li></ol><button className="button button--secondary" onClick={() => onToast("Email test checklist copied")}>Copy test checklist</button></div></section>}
-      {tab === "widget" && <section><SettingsHeading kicker="WIDGET INSTALL" title="Install in under a minute." /><div className="setup-card"><span className="status-chip status-chip--met">Ready after deployment</span><p>Add this once just before the closing <code>&lt;/body&gt;</code> tag. It stores a visitor token locally so people can return to the same chat history.</p><pre>{`<script async\n  src="https://your-app.vercel.app/widget.js"\n  data-workspace="${workspacePublicId ?? "your-workspace-public-id"}">\n</script>`}</pre><button className="button button--secondary" onClick={() => { setCopied(true); onToast("Install script copied"); }}>{copied ? "Copied" : "Copy script"}</button></div><form className="domain-form widget-origin-form" onSubmit={addWidgetOrigin}><label>Approved website origin<input value={originDraft} onChange={(event) => setOriginDraft(event.target.value)} placeholder="https://www.yourcompany.com" /></label><button className="button button--secondary">Add origin</button></form>{widgetOrigins.length > 0 && <div className="origin-list">{widgetOrigins.map((origin) => <span key={origin}>{origin}<button onClick={() => void removeWidgetOrigin(origin)} aria-label={`Remove ${origin}`}>×</button></span>)}</div>}<p className="settings-note">Only approved origins can use this workspace’s embedded widget. The Vercel demo origin is automatically allowed for testing.</p></section>}
-      {tab === "domains" && <section><SettingsHeading kicker="CUSTOM DOMAIN" title="Your help center, on your domain." /><form className="domain-form" onSubmit={addDomain}><label>Hostname<input value={domain} onChange={(event) => setDomain(event.target.value)} placeholder="help.yourcompany.com" /></label><button className="button button--primary">Add domain</button></form><div className="dns-card"><span className="panel-label">HOW IT WORKS</span>{dnsInstructions.length ? <ol>{dnsInstructions.map((record) => <li key={`${record.type}-${record.host}`}><strong>{record.type}</strong> <code>{record.host}</code> → <code>{record.value}</code><br />{record.purpose}</li>)}</ol> : <ol><li>Add a verification TXT record at <code>_platform-verify.help.yourcompany.com</code>.</li><li>Point your hostname’s CNAME to <code>cname.vercel-dns.com</code>.</li><li>We verify the TXT record, then Vercel provisions and renews TLS.</li></ol>}<button className="text-button" onClick={() => onToast("DNS verification checks are ready")}>Check verification status</button></div></section>}
-      {tab === "developers" && <section><SettingsHeading kicker="DEVELOPERS" title="Connect Intercom to the rest of your stack." /><div className="developer-grid"><div className="setup-card"><span className="panel-label">API TOKEN</span><h3>Production token</h3><p>Use a workspace-scoped Bearer token for programmatic conversation access.</p><button className="button button--secondary" onClick={() => onToast("A new API token can be created after credentials are connected")}>Create token</button></div><div className="setup-card"><span className="panel-label">WEBHOOKS</span><h3>Conversation events</h3><p>Deliver signed events with automatic retry and an inspectable delivery log.</p><label className="switch"><input type="checkbox" checked={webhookEnabled} onChange={(event) => { setWebhookEnabled(event.target.checked); onToast(`Webhook delivery ${event.target.checked ? "enabled" : "paused"}`); }} /><span /><b>{webhookEnabled ? "Enabled" : "Paused"}</b></label></div></div><div className="webhook-events"><span className="panel-label">SUBSCRIBED EVENTS</span><code>conversation.created</code><code>conversation.updated</code><code>message.created</code><button className="text-button" onClick={() => onToast("Webhook event picker opened")}>Manage events</button></div></section>}
+      {tab === "email" && <section><SettingsHeading kicker="EMAIL CHANNEL" title="A normal email in. A normal email out." /><div className="setup-card"><span className={`status-chip ${inboundEmailDomain ? "status-chip--met" : "status-chip--at-risk"}`}>{inboundEmailDomain ? "Provider connected" : "Provider needs setup"}</span><h3>{inboundEmailDomain ? `${workspaceSlug}@${inboundEmailDomain}` : "Configure your inbound address"}</h3><p>Incoming email becomes a threaded conversation. Dashboard replies preserve Message-ID headers and send the workspace alias as Reply-To.</p><ol><li>Send a test email to your configured Resend receiving address using this workspace slug.</li><li>Watch it arrive in the unified inbox.</li><li>Reply from the dashboard and confirm the normal email thread.</li></ol><button className="button button--secondary" onClick={() => onToast("Email test checklist copied")}>Copy test checklist</button></div></section>}
+      {tab === "widget" && <section><SettingsHeading kicker="WIDGET INSTALL" title="Install in under a minute." /><div className="setup-card"><span className="status-chip status-chip--met">Ready after deployment</span><p>Add this once just before the closing <code>&lt;/body&gt;</code> tag. It stores a visitor token locally so people can return to the same chat history.</p><pre>{`<script async\n  src="${appUrl || "https://your-app.vercel.app"}/widget.js"\n  data-workspace="${workspacePublicId ?? "your-workspace-public-id"}">\n</script>`}</pre><button className="button button--secondary" onClick={() => { setCopied(true); onToast("Install script copied"); }}>{copied ? "Copied" : "Copy script"}</button></div><form className="domain-form widget-origin-form" onSubmit={addWidgetOrigin}><label>Approved website origin<input value={originDraft} onChange={(event) => setOriginDraft(event.target.value)} placeholder="https://www.yourcompany.com" /></label><button className="button button--secondary">Add origin</button></form>{widgetOrigins.length > 0 && <div className="origin-list">{widgetOrigins.map((origin) => <span key={origin}>{origin}<button onClick={() => void removeWidgetOrigin(origin)} aria-label={`Remove ${origin}`}>×</button></span>)}</div>}<p className="settings-note">Only approved origins can use this workspace’s embedded widget.</p></section>}
+      {tab === "domains" && <section><SettingsHeading kicker="CUSTOM DOMAIN" title="Your help center, on your domain." /><form className="domain-form" onSubmit={addDomain}><label>Hostname<input value={domain} onChange={(event) => setDomain(event.target.value)} placeholder="help.yourcompany.com" /></label><button className="button button--primary">Add domain</button></form><div className="dns-card"><span className="panel-label">HOW IT WORKS</span>{dnsInstructions.length ? <ol>{dnsInstructions.map((record) => <li key={`${record.type}-${record.host}`}><strong>{record.type}</strong> <code>{record.host}</code> → <code>{record.value}</code><br />{record.purpose}</li>)}</ol> : <ol><li>Add a verification TXT record at <code>_platform-verify.help.yourcompany.com</code>.</li><li>Point your hostname’s CNAME to <code>cname.vercel-dns.com</code>.</li><li>We verify the TXT record, then Vercel provisions and renews TLS.</li></ol>}</div>{domains.length > 0 && <div className="domain-status-list">{domains.map((item) => <div key={item.id}><span><strong>{item.hostname}</strong><small>{item.failure_reason || (item.verification_checked_at ? `Checked ${new Date(item.verification_checked_at).toLocaleString()}` : "Awaiting DNS verification")}</small></span><b className={`status-chip ${item.status === "active" ? "status-chip--met" : item.status === "failed" ? "status-chip--breached" : "status-chip--at-risk"}`}>{item.status.replaceAll("_", " ")}</b><button className="button button--secondary" onClick={() => void verifyDomain(item)}>Verify DNS</button></div>)}</div>}</section>}
+      {tab === "developers" && <section><SettingsHeading kicker="DEVELOPERS" title="Connect Intercom to the rest of your stack." /><div className="developer-grid"><div className="setup-card"><span className="panel-label">API TOKEN</span><h3>Create a scoped token</h3><p>Tokens are workspace-scoped. The secret is shown only once.</p><form className="compact-form" onSubmit={createToken}><input value={tokenName} onChange={(event) => setTokenName(event.target.value)} placeholder="Production integration" /><button className="button button--secondary">Create token</button></form>{createdToken && <div className="secret-reveal"><code>{createdToken}</code><button className="text-button" onClick={() => { navigator.clipboard?.writeText(createdToken); onToast("Token copied"); }}>Copy</button><button className="text-button" onClick={() => setCreatedToken(null)}>Hide</button></div>}{apiTokens.length > 0 && <ul className="token-list">{apiTokens.map((token) => <li key={token.id}><span><strong>{token.name}</strong><small>{token.token_prefix}… · {token.last_used_at ? `used ${new Date(token.last_used_at).toLocaleDateString()}` : "not used yet"}</small></span><code>{token.scopes.join(", ")}</code></li>)}</ul>}</div><div className="setup-card"><span className="panel-label">WEBHOOKS</span><h3>Subscribe to events</h3><p>Deliver signed conversation events with automatic retry.</p><form className="compact-form" onSubmit={createWebhook}><input value={webhookUrl} onChange={(event) => setWebhookUrl(event.target.value)} placeholder="https://example.com/intercom-webhook" type="url" /><button className="button button--secondary">Add webhook</button></form>{webhooks.length > 0 && <ul className="token-list">{webhooks.map((webhook) => <li key={webhook.id}><span><strong>{webhook.url}</strong><small>{webhook.active ? "Active" : "Paused"}</small></span><code>{webhook.event_types.length} events</code></li>)}</ul>}</div></div><section className="setup-card canned-response-card"><span className="panel-label">CANNED RESPONSES</span><h3>Save a reply your team can reuse.</h3><form className="compact-form compact-form--stacked" onSubmit={createCannedResponse}><input value={cannedTitle} onChange={(event) => setCannedTitle(event.target.value)} placeholder="Reply title" /><textarea value={cannedBody} onChange={(event) => setCannedBody(event.target.value)} placeholder="Write the saved reply…" /><button className="button button--secondary">Save canned response</button></form></section></section>}
     </div></div>
       {inviteOpen && <div className="modal-backdrop"><form className="invite-modal" onSubmit={invite}><header><div><span className="eyebrow">TEAM MEMBER</span><h2>Invite a teammate</h2></div><button type="button" className="modal-close" onClick={() => setInviteOpen(false)}>×</button></header><label>Email address<input name="email" type="email" placeholder="teammate@company.com" autoFocus /></label><label>Role<select name="role"><option>Agent</option><option>Admin</option></select></label><p>They will receive a secure, one-time link to join this workspace.</p><footer><button type="button" className="button button--secondary" onClick={() => setInviteOpen(false)}>Cancel</button><button className="button button--primary">Send invitation</button></footer></form></div>}
     </section>

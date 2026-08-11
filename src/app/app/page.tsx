@@ -137,6 +137,8 @@ async function getWorkspaceView() {
         publicId: workspace.public_id,
         name: workspace.name,
         slug: workspace.slug,
+        appUrl: process.env.NEXT_PUBLIC_APP_URL ?? null,
+        inboundEmailDomain: process.env.RESEND_INBOUND_DOMAIN ?? null,
         currentUser: { name: ownName, initials: initials(ownName), role: membership.role === "admin" ? "Admin" : "Agent", location: profile?.timezone || "Your workspace" },
         members: workspaceMembers,
       },

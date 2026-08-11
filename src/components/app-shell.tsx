@@ -21,6 +21,8 @@ type WorkspaceView = {
   publicId?: string;
   name: string;
   slug: string;
+  appUrl?: string | null;
+  inboundEmailDomain?: string | null;
   currentUser: { name: string; initials: string; role: string; location: string };
   members: Array<{ id: string; name: string; initials: string; role: string; location: string; tone: "current" | "sage" | "sand" | "peach" }>;
 };
@@ -418,7 +420,7 @@ export function AppShell({
         ) : screen === "analytics" ? (
           <AnalyticsSurface onToast={announce} workspaceId={isDemo ? undefined : initialWorkspace.id} />
         ) : screen === "settings" ? (
-          <SettingsSurface onToast={announce} workspaceId={isDemo ? undefined : initialWorkspace.id} workspacePublicId={isDemo ? undefined : initialWorkspace.publicId} workspaceName={initialWorkspace.name} workspaceSlug={initialWorkspace.slug} members={initialWorkspace.members} />
+          <SettingsSurface onToast={announce} workspaceId={isDemo ? undefined : initialWorkspace.id} workspacePublicId={isDemo ? undefined : initialWorkspace.publicId} workspaceName={initialWorkspace.name} workspaceSlug={initialWorkspace.slug} appUrl={initialWorkspace.appUrl} inboundEmailDomain={initialWorkspace.inboundEmailDomain} members={initialWorkspace.members} />
         ) : (
           <section className="surface-placeholder">
             <span className="eyebrow">INTERCOM</span>
