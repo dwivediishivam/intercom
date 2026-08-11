@@ -85,6 +85,7 @@ async function getWorkspaceView() {
     return {
       kind: "workspace" as const,
       workspace: {
+        id: workspace.id,
         name: workspace.name,
         slug: workspace.slug,
         currentUser: { name: ownName, initials: initials(ownName), role: membership.role === "admin" ? "Admin" : "Agent", location: profile?.timezone || "Your workspace" },

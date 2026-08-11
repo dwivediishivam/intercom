@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { ConversationWorkspace } from "@/components/conversation-workspace";
 import { HelpCenterSurface, KnowledgeSurface, WidgetDemoSurface } from "@/components/knowledge-and-widget";
 import { AnalyticsSurface, SettingsSurface } from "@/components/operations-surfaces";
+import { RealtimeBridge } from "@/components/realtime-bridge";
 import {
   type ConversationChannel,
   type ConversationStatus,
@@ -17,6 +18,7 @@ import {
 type Screen = "inbox" | "knowledge" | "analytics" | "settings" | "help" | "widget" | "auth";
 type SavedView = "all" | "breaching" | "mine" | "unassigned" | "awaiting";
 type WorkspaceView = {
+  id?: string;
   name: string;
   slug: string;
   currentUser: { name: string; initials: string; role: string; location: string };
@@ -76,6 +78,7 @@ export function AppShell({
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  const [realtimeStatus, setRealtimeStatus] = useState<"connecting" | "connected" | "reconnecting" | "error">("connecting");
   const searchRef = useRef<HTMLInputElement>(null);
 
   const [conversations, setConversations] = useState(initialConversations);
@@ -240,9 +243,11 @@ export function AppShell({
       <main className="workspace">
         <div className="realtime-banner" role="status">
           <span className="realtime-banner__spinner" aria-hidden="true" />
-          <span>Reconnecting to the realtime channel. Replies will deliver automatically.</span>
+          <span>{isDemo ? "Previewing a demo workspace. Sign in to connect live conversations." : realtimeStatus === "connected" ? "Live updates connected. New messages appear automatically." : "Reconnecting to the realtime channel. Replies will deliver automatically."}</span>
           <button onClick={() => announce("Realtime notice dismissed")}>Dismiss</button>
         </div>
+
+        {!isDemo && <RealtimeBridge workspaceId={initialWorkspace.id} onStatus={setRealtimeStatus} />}
 
         {screen === "inbox" && activeConversation ? (
           <ConversationWorkspace
