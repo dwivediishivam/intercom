@@ -78,7 +78,20 @@ export function SettingsSurface({ onToast, workspaceId, workspacePublicId }: { o
   const [webhookEnabled, setWebhookEnabled] = useState(true);
   const [copied, setCopied] = useState(false);
   const [dnsInstructions, setDnsInstructions] = useState<Array<{ type: string; host: string; value: string; purpose: string }>>([]);
+  const [widgetOrigins, setWidgetOrigins] = useState<string[]>([]);
+  const [originDraft, setOriginDraft] = useState("");
   const content = { team: "Team", workspace: "Workspace", email: "Email channel", widget: "Widget install", domains: "Custom domain", developers: "Developers" };
+  useEffect(() => {
+    if (!workspaceId) return;
+    let active = true;
+    void fetch(`/api/workspaces/${workspaceId}/widget-origins`)
+      .then(async (response) => {
+        const payload = await response.json() as { origins?: string[] };
+        if (response.ok && active) setWidgetOrigins(payload.origins ?? []);
+      })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, [workspaceId]);
   async function invite(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -109,12 +122,40 @@ export function SettingsSurface({ onToast, workspaceId, workspacePublicId }: { o
     }
     onToast(`DNS instructions created for ${domain}`);
   }
+  async function addWidgetOrigin(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    let origin: string;
+    try { origin = new URL(originDraft).origin; } catch { onToast("Enter a full site origin such as https://www.yourcompany.com"); return; }
+    const nextOrigins = [...new Set([...widgetOrigins, origin])];
+    if (workspaceId) {
+      try {
+        const response = await fetch(`/api/workspaces/${workspaceId}/widget-origins`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ origins: nextOrigins }) });
+        const payload = await response.json() as { origins?: string[]; error?: string };
+        if (!response.ok) throw new Error(payload.error ?? "Approved origins could not be saved.");
+        setWidgetOrigins(payload.origins ?? nextOrigins);
+      } catch (error) { onToast(error instanceof Error ? error.message : "Approved origins could not be saved."); return; }
+    } else setWidgetOrigins(nextOrigins);
+    setOriginDraft("");
+    onToast("Approved widget origin saved");
+  }
+  async function removeWidgetOrigin(origin: string) {
+    const nextOrigins = widgetOrigins.filter((item) => item !== origin);
+    if (workspaceId) {
+      try {
+        const response = await fetch(`/api/workspaces/${workspaceId}/widget-origins`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ origins: nextOrigins }) });
+        const payload = await response.json() as { origins?: string[]; error?: string };
+        if (!response.ok) throw new Error(payload.error ?? "Approved origins could not be saved.");
+        setWidgetOrigins(payload.origins ?? nextOrigins);
+      } catch (error) { onToast(error instanceof Error ? error.message : "Approved origins could not be saved."); return; }
+    } else setWidgetOrigins(nextOrigins);
+    onToast("Approved widget origin removed");
+  }
   return (
     <section className="content-surface settings-surface" aria-label="Workspace settings"><header className="content-header"><div><span className="eyebrow">SETTINGS</span><h1>Make the workspace yours.</h1><p>Set up access, communication channels, customer-facing domains, and developer integrations.</p></div></header><div className="settings-layout"><nav className="settings-tabs" aria-label="Settings sections">{(Object.keys(content) as SettingsTab[]).map((key) => <button key={key} className={tab === key ? "settings-tabs__active" : ""} onClick={() => setTab(key)}>{content[key]}</button>)}</nav><div className="settings-panel">
       {tab === "team" && <section><SettingsHeading kicker="PEOPLE AND ACCESS" title="A small team with clear ownership." action={<button className="button button--primary" onClick={() => setInviteOpen(true)}>Invite teammate</button>} /><div className="member-list">{team.map((member) => <div key={member.name}><i className={`avatar avatar--${member.tone}`}>{member.initials}</i><span><strong>{member.name}</strong><small>{member.location}</small></span><b>{member.role}</b><button onClick={() => onToast(`${member.name}'s access settings opened`)}>Manage</button></div>)}</div><p className="settings-note">Admins can invite people, change workspace settings, and manage developer credentials. Agents can work with customer conversations.</p></section>}
       {tab === "workspace" && <section><SettingsHeading kicker="WORKSPACE" title="Intercom" /><form className="settings-form" onSubmit={(event) => { event.preventDefault(); onToast("Workspace details saved"); }}><label>Workspace name<input defaultValue="Intercom" /></label><label>Company website<input defaultValue="https://intercom-demo.vercel.app" /></label><label>Default timezone<select defaultValue="Asia/Kolkata"><option>Asia/Kolkata</option><option>Asia/Singapore</option><option>Europe/London</option></select></label><button className="button button--primary">Save changes</button></form></section>}
       {tab === "email" && <section><SettingsHeading kicker="EMAIL CHANNEL" title="A normal email in. A normal email out." /><div className="setup-card"><span className="status-chip status-chip--at-risk">Needs provider setup</span><h3>support@yourdomain.com</h3><p>Point Resend inbound email to this workspace. Incoming mail becomes a threaded conversation and dashboard replies preserve Message-ID headers.</p><ol><li>Verify your domain in Resend.</li><li>Add MX and SPF/DKIM records Resend provides.</li><li>Set the webhook URL to <code>/api/webhooks/resend</code>.</li></ol><button className="button button--secondary" onClick={() => onToast("Email provider setup details copied")}>Copy setup checklist</button></div></section>}
-      {tab === "widget" && <section><SettingsHeading kicker="WIDGET INSTALL" title="Install in under a minute." /><div className="setup-card"><span className="status-chip status-chip--met">Ready after deployment</span><p>Add this once just before the closing <code>&lt;/body&gt;</code> tag. It stores a visitor token locally so people can return to the same chat history.</p><pre>{`<script async\n  src="https://your-app.vercel.app/widget.js"\n  data-workspace="${workspacePublicId ?? "your-workspace-public-id"}">\n</script>`}</pre><button className="button button--secondary" onClick={() => { setCopied(true); onToast("Install script copied"); }}>{copied ? "Copied" : "Copy script"}</button></div></section>}
+      {tab === "widget" && <section><SettingsHeading kicker="WIDGET INSTALL" title="Install in under a minute." /><div className="setup-card"><span className="status-chip status-chip--met">Ready after deployment</span><p>Add this once just before the closing <code>&lt;/body&gt;</code> tag. It stores a visitor token locally so people can return to the same chat history.</p><pre>{`<script async\n  src="https://your-app.vercel.app/widget.js"\n  data-workspace="${workspacePublicId ?? "your-workspace-public-id"}">\n</script>`}</pre><button className="button button--secondary" onClick={() => { setCopied(true); onToast("Install script copied"); }}>{copied ? "Copied" : "Copy script"}</button></div><form className="domain-form widget-origin-form" onSubmit={addWidgetOrigin}><label>Approved website origin<input value={originDraft} onChange={(event) => setOriginDraft(event.target.value)} placeholder="https://www.yourcompany.com" /></label><button className="button button--secondary">Add origin</button></form>{widgetOrigins.length > 0 && <div className="origin-list">{widgetOrigins.map((origin) => <span key={origin}>{origin}<button onClick={() => void removeWidgetOrigin(origin)} aria-label={`Remove ${origin}`}>×</button></span>)}</div>}<p className="settings-note">Only approved origins can use this workspace’s embedded widget. The Vercel demo origin is automatically allowed for testing.</p></section>}
       {tab === "domains" && <section><SettingsHeading kicker="CUSTOM DOMAIN" title="Your help center, on your domain." /><form className="domain-form" onSubmit={addDomain}><label>Hostname<input value={domain} onChange={(event) => setDomain(event.target.value)} placeholder="help.yourcompany.com" /></label><button className="button button--primary">Add domain</button></form><div className="dns-card"><span className="panel-label">HOW IT WORKS</span>{dnsInstructions.length ? <ol>{dnsInstructions.map((record) => <li key={`${record.type}-${record.host}`}><strong>{record.type}</strong> <code>{record.host}</code> → <code>{record.value}</code><br />{record.purpose}</li>)}</ol> : <ol><li>Add a verification TXT record at <code>_platform-verify.help.yourcompany.com</code>.</li><li>Point your hostname’s CNAME to <code>cname.vercel-dns.com</code>.</li><li>We verify the TXT record, then Vercel provisions and renews TLS.</li></ol>}<button className="text-button" onClick={() => onToast("DNS verification checks are ready")}>Check verification status</button></div></section>}
       {tab === "developers" && <section><SettingsHeading kicker="DEVELOPERS" title="Connect Intercom to the rest of your stack." /><div className="developer-grid"><div className="setup-card"><span className="panel-label">API TOKEN</span><h3>Production token</h3><p>Use a workspace-scoped Bearer token for programmatic conversation access.</p><button className="button button--secondary" onClick={() => onToast("A new API token can be created after credentials are connected")}>Create token</button></div><div className="setup-card"><span className="panel-label">WEBHOOKS</span><h3>Conversation events</h3><p>Deliver signed events with automatic retry and an inspectable delivery log.</p><label className="switch"><input type="checkbox" checked={webhookEnabled} onChange={(event) => { setWebhookEnabled(event.target.checked); onToast(`Webhook delivery ${event.target.checked ? "enabled" : "paused"}`); }} /><span /><b>{webhookEnabled ? "Enabled" : "Paused"}</b></label></div></div><div className="webhook-events"><span className="panel-label">SUBSCRIBED EVENTS</span><code>conversation.created</code><code>conversation.updated</code><code>message.created</code><button className="text-button" onClick={() => onToast("Webhook event picker opened")}>Manage events</button></div></section>}
     </div></div>
