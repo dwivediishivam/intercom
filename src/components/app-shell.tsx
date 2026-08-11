@@ -16,6 +16,11 @@ import {
 
 type Screen = "inbox" | "knowledge" | "analytics" | "settings" | "help" | "widget" | "auth";
 type SavedView = "all" | "breaching" | "mine" | "unassigned" | "awaiting";
+type WorkspaceView = {
+  name: string;
+  slug: string;
+  currentUser: { name: string; initials: string; role: string; location: string };
+};
 
 const mainNavigation: Array<{ key: Screen; label: string }> = [
   { key: "inbox", label: "Inbox" },
@@ -50,7 +55,15 @@ function DemoBadge() {
   return <span className="demo-badge">DEMO WORKSPACE</span>;
 }
 
-export function AppShell() {
+export function AppShell({
+  initialWorkspace = demoWorkspace,
+  initialConversations = demoWorkspace.conversations,
+  isDemo = true,
+}: {
+  initialWorkspace?: WorkspaceView;
+  initialConversations?: DemoConversation[];
+  isDemo?: boolean;
+}) {
   const router = useRouter();
   const [screen, setScreen] = useState<Screen>("inbox");
   const [status, setStatus] = useState<ConversationStatus>("open");
@@ -65,7 +78,7 @@ export function AppShell() {
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
-  const conversations = demoWorkspace.conversations;
+  const [conversations, setConversations] = useState(initialConversations);
   const activeConversation = conversations.find((item) => item.id === activeConversationId) ?? null;
   const counts = useMemo(
     () => ({
@@ -129,6 +142,34 @@ export function AppShell() {
     setToast(message);
   }
 
+  async function updateConversationStatus(action: "resolve" | "snooze") {
+    if (!activeConversation) return;
+    const nextStatus: ConversationStatus = action === "resolve" ? "resolved" : "snoozed";
+    const label = action === "resolve"
+      ? `${activeConversation.subject} resolved`
+      : `${activeConversation.subject} snoozed until tomorrow, 09:00`;
+    if (!isDemo) {
+      try {
+        const response = await fetch(`/api/conversations/${activeConversation.id}/actions`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(action === "resolve"
+            ? { action: "resolve" }
+            : { action: "snooze", until: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() }),
+        });
+        if (!response.ok) throw new Error("Unable to update the conversation.");
+      } catch (error) {
+        announce(error instanceof Error ? error.message : "Unable to update the conversation.");
+        return;
+      }
+    }
+    setConversations((current) => current.map((conversation) => conversation.id === activeConversation.id
+      ? { ...conversation, status: nextStatus, unread: false }
+      : conversation));
+    announce(label);
+    setActiveConversationId(null);
+  }
+
   function openConversation(conversation: DemoConversation) {
     setActiveConversationId(conversation.id);
   }
@@ -177,7 +218,7 @@ export function AppShell() {
             <button
               className={`nav-item ${screen === item.key ? "nav-item--active" : ""}`}
               key={item.key}
-              onClick={() => changeScreen(item.key)}
+              onClick={() => item.key === "auth" ? router.push("/login") : changeScreen(item.key)}
             >
               <span className="nav-item__dot" />
               <span>{item.label}</span>
@@ -186,10 +227,10 @@ export function AppShell() {
         </nav>
 
         <div className="sidebar__profile">
-          <div className="avatar avatar--current">{demoWorkspace.currentUser.initials}</div>
+          <div className="avatar avatar--current">{initialWorkspace.currentUser.initials}</div>
           <div>
-            <strong>{demoWorkspace.currentUser.name}</strong>
-            <span>{demoWorkspace.currentUser.role} · {demoWorkspace.currentUser.location}</span>
+            <strong>{initialWorkspace.currentUser.name}</strong>
+            <span>{initialWorkspace.currentUser.role} · {initialWorkspace.currentUser.location}</span>
           </div>
         </div>
       </aside>
@@ -209,8 +250,8 @@ export function AppShell() {
             conversation={activeConversation}
             onBack={() => setActiveConversationId(null)}
             onToast={announce}
-            onResolve={() => { announce(`${activeConversation.subject} resolved`); setActiveConversationId(null); }}
-            onSnooze={() => { announce(`${activeConversation.subject} snoozed until tomorrow, 09:00`); setActiveConversationId(null); }}
+            onResolve={() => void updateConversationStatus("resolve")}
+            onSnooze={() => void updateConversationStatus("snooze")}
           />
         ) : screen === "inbox" ? (
           <section className="inbox" aria-label="Unified inbox">
@@ -221,7 +262,7 @@ export function AppShell() {
                     <h1>Inbox</h1>
                     <span>{filtered.length} conversation{filtered.length === 1 ? "" : "s"} · {counts.open} open across the team</span>
                   </div>
-                  <DemoBadge />
+                  {isDemo && <DemoBadge />}
                 </div>
                 <div className="header-actions">
                   <button className="button button--secondary" onClick={() => setShowEmpty((current) => !current)}>
