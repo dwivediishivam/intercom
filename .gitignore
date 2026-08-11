@@ -15,3 +15,17 @@ coverage/
 .vercel/
 *.log
 *.tsbuildinfo
+
+# Local editor and operating-system files
+.DS_Store
+.vscode/
+*.swp
+*.swo
+
+# Local test artifacts
+playwright-report/
+test-results/
+
+# Supabase local CLI state
+supabase/.temp/
+supabase/.branches/
