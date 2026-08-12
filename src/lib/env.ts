@@ -1,5 +1,14 @@
 import { z } from "zod";
 
+/** Hosting dashboards commonly submit optional values as an empty string. */
+function blankToUndefined(value: unknown) {
+  return typeof value === "string" && value.trim() === "" ? undefined : value;
+}
+
+const optionalServerString = z.preprocess(blankToUndefined, z.string().min(1).optional());
+const optionalServerEmail = z.preprocess(blankToUndefined, z.string().email().optional());
+const modelName = z.preprocess(blankToUndefined, z.string().min(1).default("gpt-5-mini"));
+
 const publicEnvironmentSchema = z.object({
   NEXT_PUBLIC_SUPABASE_URL: z.string().url(),
   NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: z.string().min(1),
@@ -8,17 +17,17 @@ const publicEnvironmentSchema = z.object({
 
 const serverEnvironmentSchema = publicEnvironmentSchema.extend({
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
-  OPENAI_API_KEY: z.string().min(1).optional(),
-  OPENAI_MODEL: z.string().min(1).default("gpt-5-mini"),
-  RESEND_API_KEY: z.string().min(1).optional(),
-  RESEND_WEBHOOK_SECRET: z.string().min(1).optional(),
-  RESEND_FROM_EMAIL: z.string().email().optional(),
-  RESEND_INBOUND_DOMAIN: z.string().min(1).optional(),
-  WEBHOOK_ENCRYPTION_KEY: z.string().min(1).optional(),
-  CRON_SECRET: z.string().min(1).optional(),
-  VERCEL_TOKEN: z.string().min(1).optional(),
-  VERCEL_TEAM_ID: z.string().min(1).optional(),
-  VERCEL_PROJECT_ID: z.string().min(1).optional(),
+  OPENAI_API_KEY: optionalServerString,
+  OPENAI_MODEL: modelName,
+  RESEND_API_KEY: optionalServerString,
+  RESEND_WEBHOOK_SECRET: optionalServerString,
+  RESEND_FROM_EMAIL: optionalServerEmail,
+  RESEND_INBOUND_DOMAIN: optionalServerString,
+  WEBHOOK_ENCRYPTION_KEY: optionalServerString,
+  CRON_SECRET: optionalServerString,
+  VERCEL_TOKEN: optionalServerString,
+  VERCEL_TEAM_ID: optionalServerString,
+  VERCEL_PROJECT_ID: optionalServerString,
 });
 
 export type ServerEnvironment = z.infer<typeof serverEnvironmentSchema>;
