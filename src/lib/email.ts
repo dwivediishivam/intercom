@@ -95,20 +95,27 @@ export async function ingestInboundEmail(email: InboundEmail) {
       conversationId = threadMessage?.conversation_id ?? null;
     }
 
-    const { data: contact, error: contactError } = await admin
+    const senderEmail = email.from.email.toLowerCase();
+    const { data: existingContact, error: existingContactError } = await admin
       .from("contacts")
-      .upsert(
-        {
-          workspace_id: workspace.id,
-          email: email.from.email.toLowerCase(),
-          name: email.from.name ?? null,
-          last_seen_at: email.receivedAt,
-        },
-        { onConflict: "workspace_id,email" },
-      )
       .select("id")
-      .single();
-    if (contactError) throw contactError;
+      .eq("workspace_id", workspace.id)
+      .eq("email", senderEmail)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (existingContactError) throw existingContactError;
+
+    const contactPayload = {
+      workspace_id: workspace.id,
+      email: senderEmail,
+      name: email.from.name ?? null,
+      last_seen_at: email.receivedAt,
+    };
+    const { data: contact, error: contactError } = existingContact
+      ? await admin.from("contacts").update(contactPayload).eq("id", existingContact.id).select("id").single()
+      : await admin.from("contacts").insert(contactPayload).select("id").single();
+    if (contactError || !contact) throw contactError ?? new Error("Unable to store the email contact.");
 
     if (!conversationId) {
       const { data, error } = await admin
