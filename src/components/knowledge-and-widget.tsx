@@ -48,6 +48,7 @@ export function KnowledgeSurface({ onToast, workspaceId }: { onToast: Notice; wo
   const [articles, setArticles] = useState<Article[]>(() => isLive ? [] : initialArticles);
   const [collections, setCollections] = useState<KnowledgeSnapshot["categories"]>([]);
   const [sections, setSections] = useState<KnowledgeSnapshot["sections"]>([]);
+  const [selectedCollectionId, setSelectedCollectionId] = useState("all");
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<"All" | Article["status"]>("All");
   const [editorOpen, setEditorOpen] = useState(false);
@@ -58,6 +59,17 @@ export function KnowledgeSurface({ onToast, workspaceId }: { onToast: Notice; wo
   const [collectionOpen, setCollectionOpen] = useState(false);
   const [collectionName, setCollectionName] = useState("");
   const editorRef = useRef<HTMLDivElement>(null);
+
+  // `contentEditable` must stay outside React's child reconciliation while a
+  // person is typing. Rendering draftBody as a child on every keypress moved
+  // the caret and could make text appear in the wrong position.
+  useEffect(() => {
+    if (!editorOpen || !editorRef.current) return;
+    editorRef.current.textContent = draftBody;
+  // The value is deliberately copied only when the editor opens or switches
+  // article; subsequent typing is owned by the browser.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editorOpen, editingArticleId]);
 
   useEffect(() => {
     if (!workspaceId) return;
@@ -90,10 +102,12 @@ export function KnowledgeSurface({ onToast, workspaceId }: { onToast: Notice; wo
     return () => { active = false; };
   }, [onToast, workspaceId]);
 
-  const filtered = useMemo(() => articles.filter((article) => (
-    (status === "All" || article.status === status) &&
-    [article.title, article.excerpt, article.category].join(" ").toLowerCase().includes(query.toLowerCase())
-  )), [articles, query, status]);
+  const filtered = useMemo(() => articles.filter((article) => {
+    const collectionId = sections.find((section) => section.id === article.sectionId)?.category_id;
+    return (status === "All" || article.status === status) &&
+      (selectedCollectionId === "all" || collectionId === selectedCollectionId) &&
+      [article.title, article.excerpt, article.category].join(" ").toLowerCase().includes(query.toLowerCase());
+  }), [articles, query, sections, selectedCollectionId, status]);
 
   async function publishArticle() {
     const title = draftTitle.trim();
@@ -143,6 +157,7 @@ export function KnowledgeSurface({ onToast, workspaceId }: { onToast: Notice; wo
       setCollections((current) => [...current, payload.category!]);
       if (payload.defaultSection) setSections((current) => [...current, payload.defaultSection!]);
       setDraftCollectionId(payload.category.id);
+      setSelectedCollectionId(payload.category.id);
       setCollectionName(""); setCollectionOpen(false);
       onToast("Knowledge collection created.");
     } catch (error) { onToast(error instanceof Error ? error.message : "Collection could not be created."); }
@@ -158,9 +173,9 @@ export function KnowledgeSurface({ onToast, workspaceId }: { onToast: Notice; wo
     ? collections.map((category) => {
       const categorySections = sections.filter((section) => section.category_id === category.id);
       const count = articles.filter((article) => categorySections.some((section) => section.id === article.sectionId)).length;
-      return [category.name, "", `${count} article${count === 1 ? "" : "s"}`];
+      return { id: category.id, name: category.name, count: `${count} article${count === 1 ? "" : "s"}` };
     })
-    : categories;
+    : categories.map(([name, , count]) => ({ id: name, name, count }));
 
   return (
     <section className="content-surface knowledge-surface" aria-label="Knowledge base management">
@@ -172,7 +187,8 @@ export function KnowledgeSurface({ onToast, workspaceId }: { onToast: Notice; wo
       <div className="knowledge-layout">
         <aside className="knowledge-tree">
           <div className="panel-caption"><span>COLLECTION</span><button onClick={() => setCollectionOpen(true)}>Manage</button></div>
-          {collectionItems.map(([category, _section, count]) => <div className="knowledge-tree__item" key={category}><strong>{category}</strong><small>{count}</small></div>)}
+          <button className={`knowledge-tree__item ${selectedCollectionId === "all" ? "knowledge-tree__item--active" : ""}`} onClick={() => setSelectedCollectionId("all")}><strong>All collections</strong><small>{articles.length} article{articles.length === 1 ? "" : "s"}</small></button>
+          {collectionItems.map((collection) => <button className={`knowledge-tree__item ${selectedCollectionId === collection.id ? "knowledge-tree__item--active" : ""}`} key={collection.id} onClick={() => setSelectedCollectionId(collection.id)}><strong>{collection.name}</strong><small>{collection.count}</small></button>)}
           <button className="add-link" onClick={() => setCollectionOpen(true)}>+ Add collection</button>
         </aside>
         <div className="knowledge-content">
@@ -184,7 +200,7 @@ export function KnowledgeSurface({ onToast, workspaceId }: { onToast: Notice; wo
         </div>
       </div>
 
-      {editorOpen && <div className="modal-backdrop" role="presentation"><section className="article-editor" role="dialog" aria-modal="true" aria-label="Article editor"><header><div><span className="eyebrow">ARTICLE EDITOR</span><h2>{editingArticleId ? "Edit article" : "Create article"}</h2></div><button className="modal-close" onClick={() => setEditorOpen(false)} aria-label="Close article editor">×</button></header><label>Collection<select value={draftCollectionId} onChange={(event) => setDraftCollectionId(event.target.value)}><option value="">Choose a collection</option>{collections.map((collection) => <option key={collection.id} value={collection.id}>{collection.name}</option>)}</select></label>{!collections.length && <button className="add-link" onClick={() => setCollectionOpen(true)}>+ Create a collection</button>}<label>Title<input value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} placeholder="A clear, searchable question" autoFocus /></label><label>Article content<div className="rich-editor"><div className="rich-editor__toolbar"><button type="button" onClick={() => formatEditor("bold")} aria-label="Bold text"><b>B</b></button><button type="button" onClick={() => formatEditor("italic")} aria-label="Italic text"><i>I</i></button><button type="button" onClick={() => formatEditor("insertUnorderedList")} aria-label="Bullet list">• List</button></div><div ref={editorRef} className="rich-editor__canvas" contentEditable suppressContentEditableWarning onInput={(event) => setDraftBody(event.currentTarget.innerText)} data-placeholder="Write the answer your customer needs…">{draftBody}</div></div></label><div className="article-editor__meta"><span>{collections.find((collection) => collection.id === draftCollectionId)?.name ?? "Choose where this article belongs"}</span><span>Formatting is saved as safe HTML.</span></div><footer><button className="button button--secondary" onClick={() => { setEditorOpen(false); onToast("Draft kept open in this session"); }}>Save draft</button><button className="button button--primary" onClick={publishArticle}>Publish article</button></footer></section></div>}
+      {editorOpen && <div className="modal-backdrop" role="presentation"><section className="article-editor" role="dialog" aria-modal="true" aria-label="Article editor"><header><div><span className="eyebrow">ARTICLE EDITOR</span><h2>{editingArticleId ? "Edit article" : "Create article"}</h2></div><button className="modal-close" onClick={() => setEditorOpen(false)} aria-label="Close article editor">×</button></header><label>Collection<select value={draftCollectionId} onChange={(event) => setDraftCollectionId(event.target.value)}><option value="">Choose a collection</option>{collections.map((collection) => <option key={collection.id} value={collection.id}>{collection.name}</option>)}</select></label>{!collections.length && <button className="add-link" onClick={() => setCollectionOpen(true)}>+ Create a collection</button>}<label>Title<input value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} placeholder="A clear, searchable question" autoFocus /></label><label>Article content<div className="rich-editor"><div className="rich-editor__toolbar"><button type="button" onClick={() => formatEditor("bold")} aria-label="Bold text"><b>B</b></button><button type="button" onClick={() => formatEditor("italic")} aria-label="Italic text"><i>I</i></button><button type="button" onClick={() => formatEditor("insertUnorderedList")} aria-label="Bullet list">• List</button></div><div ref={editorRef} className="rich-editor__canvas" contentEditable suppressContentEditableWarning onInput={(event) => setDraftBody(event.currentTarget.innerText)} data-placeholder="Write the answer your customer needs…" /></div></label><div className="article-editor__meta"><span>{collections.find((collection) => collection.id === draftCollectionId)?.name ?? "Choose where this article belongs"}</span><span>Formatting is saved as safe HTML.</span></div><footer><button className="button button--secondary" onClick={() => { setEditorOpen(false); onToast("Draft kept open in this session"); }}>Save draft</button><button className="button button--primary" onClick={publishArticle}>Publish article</button></footer></section></div>}
       {collectionOpen && <div className="modal-backdrop"><form className="invite-modal" onSubmit={createCollection}><header><div><span className="eyebrow">KNOWLEDGE BASE</span><h2>New collection</h2></div><button type="button" className="modal-close" onClick={() => setCollectionOpen(false)}>×</button></header><label>Collection name<input value={collectionName} onChange={(event) => setCollectionName(event.target.value)} placeholder="Getting started" autoFocus /></label><footer><button type="button" className="button button--secondary" onClick={() => setCollectionOpen(false)}>Cancel</button><button className="button button--primary">Create collection</button></footer></form></div>}
     </section>
   );

@@ -4,6 +4,7 @@ const widgetSource = String.raw`(() => {
   const script = document.currentScript || document.querySelector('script[data-workspace][src*="widget.js"]');
   if (!script) return;
   const workspacePublicId = script.dataset.workspace;
+  const openOnLoad = script.dataset.open === "true";
   if (!workspacePublicId) {
     console.error("Intercom widget: data-workspace is required.");
     return;
@@ -152,7 +153,7 @@ const widgetSource = String.raw`(() => {
   });
 
   document.body.append(host);
-  bootstrap(true).catch(error => renderError(error instanceof Error ? error.message : "Could not load support chat."));
+  bootstrap(true).then(() => { if (openOnLoad) setOpen(true); }).catch(error => renderError(error instanceof Error ? error.message : "Could not load support chat."));
   window.setInterval(() => { if (isOpen) refresh(); }, 3500);
 })();`;
 
@@ -160,7 +161,7 @@ export async function GET() {
   return new Response(widgetSource, {
     headers: {
       "content-type": "application/javascript; charset=utf-8",
-      "cache-control": "public, max-age=300, s-maxage=3600, stale-while-revalidate=86400",
+      "cache-control": "no-store, max-age=0",
       "x-content-type-options": "nosniff",
     },
   });

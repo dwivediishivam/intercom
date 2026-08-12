@@ -25,6 +25,9 @@ export function LiveWidgetDemo() {
     script.async = true;
     script.src = "/widget.js";
     script.dataset.workspace = workspaceId;
+    // The demo is a proof page, so open the real widget immediately instead of
+    // making a reviewer hunt for a launcher in the corner.
+    script.dataset.open = "true";
     document.body.append(script);
     return () => {
       script.remove();
@@ -66,11 +69,10 @@ export function LiveWidgetDemo() {
     <section>
       <span className="eyebrow">NORTHSTAR COLLECTIVE</span>
       <h1>Support that feels close, wherever your customers are.</h1>
-      <p>This is an independent customer-facing page with your live Intercom script installed. Open the launcher in the lower-right, send a message, and the support assistant will reply immediately. The conversation then appears in the connected inbox.</p>
+      <p>Use the support chat already open in the lower-right. Send a message and the assistant will reply immediately; the same conversation appears in the connected inbox.</p>
       <div className="live-widget-host__actions"><a href="/app">View unified inbox</a></div>
     </section>
     <aside id="how-it-works" className="live-widget-host__guide"><span>01 · Message from this page</span><span>02 · It becomes a chat conversation</span><span>03 · Reply from the dashboard</span></aside>
-    <footer><code>{`data-workspace="${workspaceId}"`}</code><span>Messages and chat history use the connected workspace—not a mock dataset.</span></footer>
     {message && <div className="toast" role="status"><span className="toast__dot" />{message}<button onClick={() => setMessage(null)}>×</button></div>}
   </main>;
 }

@@ -3,3 +3,61 @@
   font-family: inherit;
   font-size: 11.5px;
 }
+
+.knowledge-tree__item {
+  width: 100%;
+  border: 0;
+  color: var(--ink);
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.knowledge-tree__item:hover,
+.knowledge-tree__item--active {
+  background: #f1efeb;
+}
+
+.knowledge-tree__item--active {
+  box-shadow: inset 2px 0 0 var(--terracotta);
+}
+
+.button--danger {
+  color: #fff;
+  background: #a83d30;
+}
+
+.button--danger:hover:not(:disabled) {
+  background: #8d2f25;
+}
+
+.account-card + .account-card {
+  margin-top: 14px;
+}
+
+.account-card--danger {
+  border-color: #e7c5bf;
+  background: #fffafa;
+}
+
+.landing-nav__logout,
+.landing-footer button {
+  padding: 0;
+  border: 0;
+  color: #55615b;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 720;
+}
+
+.landing-nav__logout:hover,
+.landing-footer button:hover {
+  color: var(--landing-ink);
+}
+
+.landing-footer button {
+  font-size: 10px;
+  font-weight: 400;
+}
