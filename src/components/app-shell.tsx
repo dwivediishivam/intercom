@@ -1,6 +1,6 @@
 "use client";
 
-import { KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
+import { KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { ConversationWorkspace } from "@/components/conversation-workspace";
@@ -140,9 +140,9 @@ export function AppShell({
     setSelected((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]));
   }
 
-  function announce(message: string) {
+  const announce = useCallback((message: string) => {
     setToast(message);
-  }
+  }, []);
 
   function refreshWorkspace() {
     setRefreshing(true);
@@ -427,7 +427,7 @@ export function AppShell({
         ) : screen === "knowledge" ? (
           <KnowledgeSurface onToast={announce} workspaceId={isDemo ? undefined : initialWorkspace.id} />
         ) : screen === "analytics" ? (
-          <AnalyticsSurface onToast={announce} workspaceId={isDemo ? undefined : initialWorkspace.id} />
+          <AnalyticsSurface onToast={announce} workspaceId={isDemo ? undefined : initialWorkspace.id} members={initialWorkspace.members} />
         ) : screen === "settings" ? (
           <SettingsSurface onToast={announce} workspaceId={isDemo ? undefined : initialWorkspace.id} workspacePublicId={isDemo ? undefined : initialWorkspace.publicId} workspaceName={initialWorkspace.name} workspaceSlug={initialWorkspace.slug} appUrl={initialWorkspace.appUrl} inboundEmailDomain={initialWorkspace.inboundEmailDomain} members={initialWorkspace.members} isAdmin={initialWorkspace.currentUser.role === "Admin"} />
         ) : (

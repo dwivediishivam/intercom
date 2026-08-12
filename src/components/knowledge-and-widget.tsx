@@ -269,22 +269,3 @@ export function HelpCenterSurface({ onToast, live = false }: { onToast: Notice; 
     </section>
   );
 }
-
-export function WidgetDemoSurface({ onToast }: { onToast: Notice }) {
-  const [opened, setOpened] = useState(true);
-  const [visitorMessage, setVisitorMessage] = useState("");
-  const [messages, setMessages] = useState([{ from: "agent", text: "Hi! I’m here to help you find an answer or connect with our team." }]);
-  const showSuggestions = visitorMessage.trim().length > 2;
-  function send() {
-    if (!visitorMessage.trim()) return;
-    setMessages((current) => [...current, { from: "visitor", text: visitorMessage.trim() }]);
-    setVisitorMessage("");
-    onToast("Demo chat message added. The deployed widget will deliver this to the unified inbox.");
-  }
-  return (
-    <section className="widget-demo" aria-label="Embeddable chat widget demo">
-      <header className="content-header"><div><span className="eyebrow">CUSTOMER-FACING</span><h1>One script. A real conversation.</h1><p>Preview the persistent live chat widget exactly as a visitor sees it. It suggests knowledge before creating a conversation for your team.</p></div><button className="button button--secondary" onClick={() => onToast("Widget installation instructions copied")}>Copy install snippet</button></header>
-      <div className="widget-demo__stage"><div className="demo-site"><nav><span>Papertrail</span><a>Features</a><a>Pricing</a><button>Start free</button></nav><main><span className="eyebrow">PAPERTRAIL FOR TEAMS</span><h2>A calmer way to build together.</h2><p>See the visitor experience without leaving your Intercom workspace.</p><button>Explore the product</button></main><code>{`<script async src="https://your-app.vercel.app/widget.js" data-workspace="..." />`}</code></div>{opened && <section className="chat-widget"><header><div><i>i</i><div><strong>Intercom support</strong><span><b /> Typically replies in minutes</span></div></div><button onClick={() => setOpened(false)} aria-label="Minimize chat">−</button></header><div className="chat-widget__messages">{messages.map((message, index) => <p className={`chat-bubble chat-bubble--${message.from}`} key={`${message.text}-${index}`}>{message.text}</p>)}{showSuggestions && <div className="widget-suggestions"><span>HELPFUL ARTICLES</span><button onClick={() => onToast("Suggested article opened")}>Update your billing details <b>→</b></button><button onClick={() => onToast("Suggested article opened")}>Get your team set up <b>→</b></button></div>}</div><div className="chat-widget__composer"><input value={visitorMessage} onChange={(event) => setVisitorMessage(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") send(); }} placeholder="Write a message…" aria-label="Chat message" /><button onClick={send} aria-label="Send chat message">↑</button></div><footer>Powered by Intercom <span>·</span> <button onClick={() => onToast("Privacy details opened")}>Privacy</button></footer></section>}{!opened && <button className="widget-launcher" onClick={() => setOpened(true)} aria-label="Open Intercom support">i<span /></button>}</div>
-    </section>
-  );
-}
