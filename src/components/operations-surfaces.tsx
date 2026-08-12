@@ -137,17 +137,19 @@ export function SettingsSurface({ onToast, workspaceId, workspacePublicId, works
     const form = new FormData(event.currentTarget);
     const email = String(form.get("email") ?? "").trim();
     const role = String(form.get("role") ?? "Agent");
+    let deliveryWarning: string | null = null;
     if (!email.includes("@")) { onToast("Enter a valid teammate email"); return; }
     const name = email.split("@")[0].split(/[._-]/).map((part) => part ? part[0].toUpperCase() + part.slice(1) : "").join(" ");
     if (workspaceId) {
       try {
         const response = await fetch(`/api/workspaces/${workspaceId}/invitations`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email, role: role.toLowerCase() }) });
-        const payload = await response.json() as { error?: string };
+        const payload = await response.json() as { error?: string; emailDelivered?: boolean; warning?: string };
         if (!response.ok) throw new Error(payload.error ?? "Invitation could not be sent.");
+        if (payload.emailDelivered === false) deliveryWarning = payload.warning ?? "Invitation created, but email delivery needs configuration.";
       } catch (error) { onToast(error instanceof Error ? error.message : "Invitation could not be sent."); return; }
     }
     setTeam((current) => [...current, { id: `pending-${email}`, name, initials: name.split(" ").map((part) => part[0]).join("").slice(0, 2), role, location: "Invitation pending", tone: "peach" }]);
-    setInviteOpen(false); onToast(`Invitation sent to ${email}`);
+    setInviteOpen(false); onToast(deliveryWarning ?? (workspaceId ? `Invitation created for ${email}` : `Invitation sent to ${email}`));
   }
   async function addDomain(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

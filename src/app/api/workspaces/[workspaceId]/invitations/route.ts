@@ -30,13 +30,24 @@ export async function POST(
       .single();
     if (workspaceError) throw workspaceError;
 
-    await sendWorkspaceInvitationEmail({
-      recipient: input.email,
-      workspaceName: workspace.name,
-      token: result.token,
-    });
-
-    return NextResponse.json({ invitation: result.invitation }, { status: 201 });
+    try {
+      await sendWorkspaceInvitationEmail({
+        recipient: input.email,
+        workspaceName: workspace.name,
+        token: result.token,
+      });
+      return NextResponse.json({ invitation: result.invitation, emailDelivered: true }, { status: 201 });
+    } catch (emailError) {
+      // The invitation remains securely stored and can be resent once a mail
+      // provider is configured. A provider outage must not misrepresent a
+      // successful email delivery to the workspace admin.
+      console.error("Workspace invitation email could not be delivered", emailError);
+      return NextResponse.json({
+        invitation: result.invitation,
+        emailDelivered: false,
+        warning: "The invitation was created, but email delivery is not configured yet.",
+      }, { status: 201 });
+    }
   } catch (error) {
     return toErrorResponse(error);
   }
