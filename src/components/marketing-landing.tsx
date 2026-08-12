@@ -2,6 +2,9 @@
 
 import { useEffect, useState, type CSSProperties } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+
+import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 
 const capabilityGroups = [
   {
@@ -30,7 +33,8 @@ const inboxRows = [
   { name: "Meera Shah", channel: "CHAT", detail: "The invite link has expired", state: "2 min ago", tone: "lavender" },
 ];
 
-export function MarketingLanding() {
+export function MarketingLanding({ isAuthenticated = false }: { isAuthenticated?: boolean }) {
+  const router = useRouter();
   const [activeCapability, setActiveCapability] = useState(0);
   const [pointer, setPointer] = useState({ x: 55, y: 24 });
   const [menuOpen, setMenuOpen] = useState(false);
@@ -48,6 +52,14 @@ export function MarketingLanding() {
 
   const active = capabilityGroups[activeCapability];
 
+  async function signOut() {
+    const { error } = await createBrowserSupabaseClient().auth.signOut();
+    if (!error) {
+      router.replace("/");
+      router.refresh();
+    }
+  }
+
   return (
     <main className="landing" style={{ "--cursor-x": `${pointer.x}%`, "--cursor-y": `${pointer.y}%` } as CSSProperties}>
       <div className="landing__grain" aria-hidden="true" />
@@ -58,8 +70,7 @@ export function MarketingLanding() {
           <a href="#product" onClick={() => setMenuOpen(false)}>Product</a>
           <a href="#channels" onClick={() => setMenuOpen(false)}>Channels</a>
           <a href="#operations" onClick={() => setMenuOpen(false)}>Operations</a>
-          <a className="landing-nav__login" href="/login">Sign in</a>
-          <a className="landing-nav__cta" href="/login?mode=signup">Start building</a>
+          {isAuthenticated ? <><a className="landing-nav__login" href="/app">Dashboard</a><button className="landing-nav__logout" onClick={() => void signOut()}>Sign out</button></> : <><a className="landing-nav__login" href="/login">Sign in</a><a className="landing-nav__cta" href="/login?mode=signup">Start building</a></>}
         </div>
       </nav>
 
@@ -69,7 +80,7 @@ export function MarketingLanding() {
           <h1>Make every<br /><em>customer moment</em><br />feel considered.</h1>
           <p>Intercom gives focused teams one intelligent home for conversations, knowledge, and the next thoughtful action.</p>
           <div className="landing-hero__actions">
-            <a className="landing-button landing-button--primary" href="/login?mode=signup">Create your workspace <b>↗</b></a>
+            <a className="landing-button landing-button--primary" href={isAuthenticated ? "/app" : "/login?mode=signup"}>{isAuthenticated ? "Open your dashboard" : "Create your workspace"} <b>↗</b></a>
             <a className="landing-button landing-button--quiet" href="/demo">Try the live widget <b>↓</b></a>
           </div>
           <div className="landing-hero__proof"><span><strong>2 channels</strong>One shared inbox</span><span><strong>Real time</strong>From visitor to teammate</span><span><strong>AI-assisted</strong>When context matters</span></div>
@@ -120,8 +131,8 @@ export function MarketingLanding() {
 
       <section className="landing-operations" id="operations"><div className="landing-operations__intro"><span>03 — THE OPERATING LAYER</span><h2>Designed for the things you should never have to chase.</h2><p>Make ownership visible. Keep a pulse on service quality. Connect the rest of your stack when a conversation becomes more than a conversation.</p></div><div className="landing-operations__grid"><article><span>↗</span><b>Team ownership</b><p>Invite admins and agents, assign work, and make hand-offs explicit.</p></article><article><span>◷</span><b>SLA awareness</b><p>Track first responses and resolutions before a customer has to ask.</p></article><article><span>⌘</span><b>Developer-ready</b><p>Webhook delivery, encrypted secrets, API tokens, and domain controls.</p></article><article><span>⌁</span><b>Contact context</b><p>See their past conversations, last seen activity, and the path that led here.</p></article></div></section>
 
-      <section className="landing-close"><div className="landing-close__glow" /><span>YOUR NEXT CONVERSATION STARTS HERE</span><h2>Build the kind of<br />support people <em>remember.</em></h2><p>Create a workspace, invite your team, and turn a blank inbox into a customer operation that feels remarkably human.</p><a className="landing-button landing-button--primary" href="/login?mode=signup">Create your workspace <b>↗</b></a></section>
-      <footer className="landing-footer"><Link className="landing-brand" href="/"><span>i</span>Intercom</Link><div><a href="/login">Sign in</a><a href="/demo">Widget demo</a><a href="/help">Help centre</a></div><small>Built for teams who care about the details.</small></footer>
+      <section className="landing-close"><div className="landing-close__glow" /><span>YOUR NEXT CONVERSATION STARTS HERE</span><h2>Build the kind of<br />support people <em>remember.</em></h2><p>{isAuthenticated ? "Your workspace is ready. Return to the inbox, test the live widget, or keep shaping the support experience." : "Create a workspace, invite your team, and turn a blank inbox into a customer operation that feels remarkably human."}</p><a className="landing-button landing-button--primary" href={isAuthenticated ? "/app" : "/login?mode=signup"}>{isAuthenticated ? "Open your dashboard" : "Create your workspace"} <b>↗</b></a></section>
+      <footer className="landing-footer"><Link className="landing-brand" href="/"><span>i</span>Intercom</Link><div>{isAuthenticated ? <><a href="/app">Dashboard</a><button onClick={() => void signOut()}>Sign out</button></> : <a href="/login">Sign in</a>}<a href="/demo">Widget demo</a><a href="/help">Help centre</a></div><small>Built for teams who care about the details.</small></footer>
     </main>
   );
 }

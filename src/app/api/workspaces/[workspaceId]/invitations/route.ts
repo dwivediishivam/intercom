@@ -8,6 +8,29 @@ import { createWorkspaceInvitation, sendWorkspaceInvitationEmail } from "@/lib/w
 
 export const dynamic = "force-dynamic";
 
+export async function GET(
+  _request: NextRequest,
+  context: { params: Promise<{ workspaceId: string }> },
+) {
+  try {
+    const { workspaceId } = await context.params;
+    uuidSchema.parse(workspaceId);
+    await requireWorkspaceMembership(workspaceId, ["admin"]);
+    const admin = createAdminClient();
+    const { data, error } = await admin
+      .from("workspace_invitations")
+      .select("id, email, role, expires_at, created_at")
+      .eq("workspace_id", workspaceId)
+      .is("accepted_at", null)
+      .gt("expires_at", new Date().toISOString())
+      .order("created_at", { ascending: false });
+    if (error) throw error;
+    return NextResponse.json({ invitations: data ?? [] });
+  } catch (error) {
+    return toErrorResponse(error);
+  }
+}
+
 export async function POST(
   request: NextRequest,
   context: { params: Promise<{ workspaceId: string }> },

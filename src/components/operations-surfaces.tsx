@@ -1,11 +1,15 @@
 "use client";
 
 import { type FormEvent, type ReactNode, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+
+import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 
 type Notice = (message: string) => void;
-type SettingsTab = "team" | "workspace" | "email" | "widget" | "domains" | "developers";
+type SettingsTab = "team" | "workspace" | "email" | "widget" | "domains" | "developers" | "account";
 
 type WorkspaceMember = { id: string; name: string; initials: string; role: string; location: string; tone: "current" | "sage" | "sand" | "peach" };
+type PendingInvitation = { id: string; email: string; role: "admin" | "agent"; expires_at: string; created_at: string };
 type WorkspaceDomain = { id: string; hostname: string; status: string; verification_checked_at: string | null; failure_reason: string | null };
 type ApiToken = { id: string; name: string; token_prefix: string; scopes: string[]; last_used_at: string | null; revoked_at: string | null; created_at: string };
 type WebhookSubscription = { id: string; url: string; event_types: string[]; active: boolean; created_at: string };
@@ -82,9 +86,11 @@ function Metric({ label, value, change, good = false }: { label: string; value: 
 }
 
 export function SettingsSurface({ onToast, workspaceId, workspacePublicId, workspaceName = "Workspace", workspaceSlug = "workspace", appUrl, inboundEmailDomain, members = [], isAdmin = false }: { onToast: Notice; workspaceId?: string; workspacePublicId?: string; workspaceName?: string; workspaceSlug?: string; appUrl?: string | null; inboundEmailDomain?: string | null; members?: WorkspaceMember[]; isAdmin?: boolean }) {
+  const router = useRouter();
   const [tab, setTab] = useState<SettingsTab>("team");
   const [domain, setDomain] = useState("");
   const [team, setTeam] = useState<WorkspaceMember[]>(members);
+  const [pendingInvitations, setPendingInvitations] = useState<PendingInvitation[]>([]);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [dnsInstructions, setDnsInstructions] = useState<Array<{ type: string; host: string; value: string; purpose: string }>>([]);
@@ -98,7 +104,10 @@ export function SettingsSurface({ onToast, workspaceId, workspacePublicId, works
   const [webhookUrl, setWebhookUrl] = useState("");
   const [cannedTitle, setCannedTitle] = useState("");
   const [cannedBody, setCannedBody] = useState("");
-  const content = { team: "Team", workspace: "Workspace", email: "Email channel", widget: "Widget install", domains: "Custom domain", developers: "Developers" };
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteConfirmation, setDeleteConfirmation] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const content = { team: "Team", workspace: "Workspace", email: "Email channel", widget: "Widget install", domains: "Custom domain", developers: "Developers", account: "Account" };
   const availableTabs = (Object.keys(content) as SettingsTab[]).filter((key) => isAdmin || !["domains", "developers"].includes(key));
   const widgetSnippet = `<script async\n  src="${appUrl || "https://your-app.vercel.app"}/widget.js"\n  data-workspace="${workspacePublicId ?? "your-workspace-public-id"}">\n</script>`;
   async function copyText(value: string, confirmation: string) {
@@ -132,6 +141,18 @@ export function SettingsSurface({ onToast, workspaceId, workspacePublicId, works
     }).catch(() => undefined);
     return () => { active = false; };
   }, [isAdmin, workspaceId]);
+  useEffect(() => {
+    if (!workspaceId || !isAdmin) return;
+    let active = true;
+    void fetch(`/api/workspaces/${workspaceId}/invitations`)
+      .then(async (response) => {
+        const payload = await response.json() as { invitations?: PendingInvitation[]; error?: string };
+        if (!response.ok) throw new Error(payload.error ?? "Pending invitations could not be loaded.");
+        if (active) setPendingInvitations(payload.invitations ?? []);
+      })
+      .catch((error: unknown) => { if (active) onToast(error instanceof Error ? error.message : "Pending invitations could not be loaded."); });
+    return () => { active = false; };
+  }, [isAdmin, onToast, workspaceId]);
   async function invite(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -139,17 +160,16 @@ export function SettingsSurface({ onToast, workspaceId, workspacePublicId, works
     const role = String(form.get("role") ?? "Agent");
     let deliveryWarning: string | null = null;
     if (!email.includes("@")) { onToast("Enter a valid teammate email"); return; }
-    const name = email.split("@")[0].split(/[._-]/).map((part) => part ? part[0].toUpperCase() + part.slice(1) : "").join(" ");
     if (workspaceId) {
       try {
         const response = await fetch(`/api/workspaces/${workspaceId}/invitations`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email, role: role.toLowerCase() }) });
-        const payload = await response.json() as { error?: string; emailDelivered?: boolean; warning?: string };
+        const payload = await response.json() as { invitation?: PendingInvitation; error?: string; emailDelivered?: boolean; warning?: string };
         if (!response.ok) throw new Error(payload.error ?? "Invitation could not be sent.");
         if (payload.emailDelivered === false) deliveryWarning = payload.warning ?? "Invitation created, but email delivery needs configuration.";
+        if (payload.invitation) setPendingInvitations((current) => [payload.invitation!, ...current.filter((item) => item.email !== payload.invitation?.email)]);
       } catch (error) { onToast(error instanceof Error ? error.message : "Invitation could not be sent."); return; }
     }
-    setTeam((current) => [...current, { id: `pending-${email}`, name, initials: name.split(" ").map((part) => part[0]).join("").slice(0, 2), role, location: "Invitation pending", tone: "peach" }]);
-    setInviteOpen(false); onToast(deliveryWarning ?? (workspaceId ? `Invitation created for ${email}` : `Invitation sent to ${email}`));
+    setInviteOpen(false); onToast(deliveryWarning ?? (workspaceId ? `Invitation email sent to ${email}` : `Invitation sent to ${email}`));
   }
   async function addDomain(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -250,16 +270,40 @@ export function SettingsSurface({ onToast, workspaceId, workspacePublicId, works
       onToast("Canned response saved. It is available in every conversation composer.");
     } catch (error) { onToast(error instanceof Error ? error.message : "Canned response could not be saved."); }
   }
+  async function signOut() {
+    const { error } = await createBrowserSupabaseClient().auth.signOut();
+    if (error) { onToast(error.message); return; }
+    router.replace("/");
+    router.refresh();
+  }
+  async function deleteAccount() {
+    if (deleteConfirmation !== "DELETE") return;
+    setDeleting(true);
+    try {
+      const response = await fetch("/api/account", { method: "DELETE" });
+      const payload = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(payload.error ?? "Account could not be deleted.");
+      await createBrowserSupabaseClient().auth.signOut();
+      router.replace("/");
+      router.refresh();
+    } catch (error) {
+      onToast(error instanceof Error ? error.message : "Account could not be deleted.");
+    } finally {
+      setDeleting(false);
+    }
+  }
   return (
     <section className="content-surface settings-surface" aria-label="Workspace settings"><header className="content-header"><div><span className="eyebrow">SETTINGS</span><h1>Make the workspace yours.</h1><p>Set up access, communication channels, custom domains, and developer integrations.</p></div></header><div className="settings-layout"><nav className="settings-tabs" aria-label="Settings sections">{availableTabs.map((key) => <button key={key} className={tab === key ? "settings-tabs__active" : ""} onClick={() => setTab(key)}>{content[key]}</button>)}</nav><div className="settings-panel">
-      {tab === "team" && <section><SettingsHeading kicker="PEOPLE AND ACCESS" title="A small team with clear ownership." action={isAdmin ? <button className="button button--primary" onClick={() => setInviteOpen(true)}>Invite teammate</button> : undefined} /><div className="member-list">{team.length ? team.map((member) => <div key={member.id}><i className={`avatar avatar--${member.tone}`}>{member.initials}</i><span><strong>{member.name}</strong><small>{member.location}</small></span><select aria-label={`Role for ${member.name}`} value={member.role} disabled={!isAdmin || member.id.startsWith("pending-")} onChange={(event) => void updateMemberRole(member, event.target.value)}><option>Admin</option><option>Agent</option></select></div>) : <p className="settings-note">Your first teammate will appear here after they accept an invitation.</p>}</div><p className="settings-note">Admins can invite people, change workspace settings, and manage developer credentials. Agents can work with customer conversations.</p></section>}
+      {tab === "team" && <section><SettingsHeading kicker="PEOPLE AND ACCESS" title="A small team with clear ownership." action={isAdmin ? <button className="button button--primary" onClick={() => setInviteOpen(true)}>Invite teammate</button> : undefined} /><div className="member-list">{team.length ? team.map((member) => <div key={member.id}><i className={`avatar avatar--${member.tone}`}>{member.initials}</i><span><strong>{member.name}</strong><small>{member.location}</small></span><select aria-label={`Role for ${member.name}`} value={member.role} disabled={!isAdmin || member.id.startsWith("pending-")} onChange={(event) => void updateMemberRole(member, event.target.value)}><option>Admin</option><option>Agent</option></select></div>) : <p className="settings-note">Your first teammate will appear here after they accept an invitation.</p>}{pendingInvitations.map((invitation) => { const name = invitation.email.split("@")[0].split(/[._-]/).filter(Boolean).map((part) => part[0].toUpperCase() + part.slice(1)).join(" "); return <div key={`pending-${invitation.id}`}><i className="avatar avatar--peach">{name.split(" ").map((part) => part[0]).join("").slice(0, 2)}</i><span><strong>{name || invitation.email}</strong><small>{invitation.email} · Invitation pending</small></span><b>{invitation.role === "admin" ? "Admin" : "Agent"}</b></div>; })}</div><p className="settings-note">Invitations remain listed here until accepted or expiry. Admins can invite people, change workspace settings, and manage developer credentials. Agents can work with customer conversations.</p></section>}
       {tab === "workspace" && <section><SettingsHeading kicker="WORKSPACE" title={workspaceName} /><div className="setup-card"><span className="panel-label">WORKSPACE IDENTITY</span><h3>{workspaceName}</h3><p>Your workspace slug is <code>{workspaceSlug}</code>. It provides the default email alias for your inbound support channel.</p></div></section>}
       {tab === "email" && <section><SettingsHeading kicker="EMAIL CHANNEL" title="A normal email in. A normal email out." /><div className="setup-card"><span className={`status-chip ${inboundEmailDomain ? "status-chip--met" : "status-chip--at-risk"}`}>{inboundEmailDomain ? "Provider connected" : "Provider needs setup"}</span><h3>{inboundEmailDomain ? `${workspaceSlug}@${inboundEmailDomain}` : "Configure your inbound address"}</h3><p>Incoming email becomes a threaded conversation. Dashboard replies preserve Message-ID headers and send the workspace alias as Reply-To.</p><ol><li>Send a test email to your configured Resend receiving address using this workspace slug.</li><li>Watch it arrive in the unified inbox.</li><li>Reply from the dashboard and confirm the normal email thread.</li></ol><button className="button button--secondary" onClick={() => void copyText("1. Send a test email to the configured Resend receiving address using this workspace slug.\n2. Refresh the inbox and open the new conversation.\n3. Reply from the dashboard and confirm it stays in the original email thread.", "Email test checklist copied")}>Copy test checklist</button></div></section>}
       {tab === "widget" && <section><SettingsHeading kicker="WIDGET INSTALL" title="Install in under a minute." /><div className="setup-card"><span className="status-chip status-chip--met">Ready after deployment</span><p>Add this once just before the closing <code>&lt;/body&gt;</code> tag. It stores a visitor token locally so people can return to the same chat history.</p><pre>{widgetSnippet}</pre><div className="header-actions"><button className="button button--secondary" onClick={() => { void copyText(widgetSnippet, "Install script copied"); setCopied(true); }}>{copied ? "Copied" : "Copy script"}</button>{workspacePublicId && <a className="button button--primary" href={`/demo?workspace=${workspacePublicId}`} target="_blank" rel="noreferrer">Open live demo</a>}</div></div>{isAdmin && <form className="domain-form widget-origin-form" onSubmit={addWidgetOrigin}><label>Approved website origin<input value={originDraft} onChange={(event) => setOriginDraft(event.target.value)} placeholder="https://www.yourcompany.com" /></label><button className="button button--secondary">Add origin</button></form>}{widgetOrigins.length > 0 && <div className="origin-list">{widgetOrigins.map((origin) => <span key={origin}>{origin}{isAdmin && <button onClick={() => void removeWidgetOrigin(origin)} aria-label={`Remove ${origin}`}>×</button>}</span>)}</div>}<p className="settings-note">Only approved origins can use this workspace’s embedded widget.</p></section>}
       {tab === "domains" && <section><SettingsHeading kicker="CUSTOM DOMAIN" title="Your help center, on your domain." /><form className="domain-form" onSubmit={addDomain}><label>Hostname<input value={domain} onChange={(event) => setDomain(event.target.value)} placeholder="help.yourcompany.com" /></label><button className="button button--primary">Add domain</button></form><div className="dns-card"><span className="panel-label">HOW IT WORKS</span>{dnsInstructions.length ? <ol>{dnsInstructions.map((record) => <li key={`${record.type}-${record.host}`}><strong>{record.type}</strong> <code>{record.host}</code> → <code>{record.value}</code><br />{record.purpose}</li>)}</ol> : <ol><li>Add a verification TXT record at <code>_platform-verify.help.yourcompany.com</code>.</li><li>Point your hostname’s CNAME to <code>cname.vercel-dns.com</code>.</li><li>We verify the TXT record, then Vercel provisions and renews TLS.</li></ol>}</div>{domains.length > 0 && <div className="domain-status-list">{domains.map((item) => <div key={item.id}><span><strong>{item.hostname}</strong><small>{item.failure_reason || (item.verification_checked_at ? `Checked ${new Date(item.verification_checked_at).toLocaleString()}` : "Awaiting DNS verification")}</small></span><b className={`status-chip ${item.status === "active" ? "status-chip--met" : item.status === "failed" ? "status-chip--breached" : "status-chip--at-risk"}`}>{item.status.replaceAll("_", " ")}</b><button className="button button--secondary" onClick={() => void verifyDomain(item)}>Verify DNS</button></div>)}</div>}</section>}
       {tab === "developers" && <section><SettingsHeading kicker="DEVELOPERS" title="Connect Intercom to the rest of your stack." /><div className="developer-grid"><div className="setup-card"><span className="panel-label">API TOKEN</span><h3>Create a scoped token</h3><p>Tokens are workspace-scoped. The secret is shown only once.</p><form className="compact-form" onSubmit={createToken}><input value={tokenName} onChange={(event) => setTokenName(event.target.value)} placeholder="Production integration" /><button className="button button--secondary">Create token</button></form>{createdToken && <div className="secret-reveal"><code>{createdToken}</code><button className="text-button" onClick={() => { navigator.clipboard?.writeText(createdToken); onToast("Token copied"); }}>Copy</button><button className="text-button" onClick={() => setCreatedToken(null)}>Hide</button></div>}{apiTokens.length > 0 && <ul className="token-list">{apiTokens.map((token) => <li key={token.id}><span><strong>{token.name}</strong><small>{token.token_prefix}… · {token.last_used_at ? `used ${new Date(token.last_used_at).toLocaleDateString()}` : "not used yet"}</small></span><code>{token.scopes.join(", ")}</code></li>)}</ul>}</div><div className="setup-card"><span className="panel-label">WEBHOOKS</span><h3>Subscribe to events</h3><p>Deliver signed conversation events with automatic retry.</p><form className="compact-form" onSubmit={createWebhook}><input value={webhookUrl} onChange={(event) => setWebhookUrl(event.target.value)} placeholder="https://example.com/intercom-webhook" type="url" /><button className="button button--secondary">Add webhook</button></form>{webhooks.length > 0 && <ul className="token-list">{webhooks.map((webhook) => <li key={webhook.id}><span><strong>{webhook.url}</strong><small>{webhook.active ? "Active" : "Paused"}</small></span><code>{webhook.event_types.length} events</code></li>)}</ul>}</div></div><section className="setup-card canned-response-card"><span className="panel-label">CANNED RESPONSES</span><h3>Save a reply your team can reuse.</h3><form className="compact-form compact-form--stacked" onSubmit={createCannedResponse}><input value={cannedTitle} onChange={(event) => setCannedTitle(event.target.value)} placeholder="Reply title" /><textarea value={cannedBody} onChange={(event) => setCannedBody(event.target.value)} placeholder="Write the saved reply…" /><button className="button button--secondary">Save canned response</button></form></section></section>}
+      {tab === "account" && <section><SettingsHeading kicker="YOUR ACCOUNT" title="Control your sign-in and data." /><div className="setup-card account-card"><span className="panel-label">SESSION</span><h3>Sign out on this device</h3><p>You can return with email or Google sign-in whenever you are ready.</p><button className="button button--secondary" onClick={() => void signOut()}>Sign out</button></div><div className="setup-card account-card account-card--danger"><span className="panel-label">PERMANENT ACTION</span><h3>Delete account</h3><p>This removes your sign-in and profile. To protect customer conversations, transfer any workspace where you are the only admin before continuing.</p><button className="button button--danger" onClick={() => { setDeleteConfirmation(""); setDeleteOpen(true); }}>Delete account</button></div></section>}
     </div></div>
       {inviteOpen && <div className="modal-backdrop"><form className="invite-modal" onSubmit={invite}><header><div><span className="eyebrow">TEAM MEMBER</span><h2>Invite a teammate</h2></div><button type="button" className="modal-close" onClick={() => setInviteOpen(false)}>×</button></header><label>Email address<input name="email" type="email" placeholder="teammate@company.com" autoFocus /></label><label>Role<select name="role"><option>Agent</option><option>Admin</option></select></label><p>They will receive a secure, one-time link to join this workspace.</p><footer><button type="button" className="button button--secondary" onClick={() => setInviteOpen(false)}>Cancel</button><button className="button button--primary">Send invitation</button></footer></form></div>}
+      {deleteOpen && <div className="modal-backdrop"><section className="invite-modal" role="dialog" aria-modal="true" aria-label="Delete account"><header><div><span className="eyebrow">PERMANENT ACTION</span><h2>Delete your account?</h2></div><button type="button" className="modal-close" onClick={() => setDeleteOpen(false)}>×</button></header><p>This cannot be undone. Type <strong>DELETE</strong> to confirm. You must first transfer any workspace where you are the only admin.</p><label>Confirmation<input value={deleteConfirmation} onChange={(event) => setDeleteConfirmation(event.target.value)} placeholder="DELETE" autoFocus /></label><footer><button type="button" className="button button--secondary" onClick={() => setDeleteOpen(false)}>Cancel</button><button type="button" className="button button--danger" disabled={deleteConfirmation !== "DELETE" || deleting} onClick={() => void deleteAccount()}>{deleting ? "Deleting account…" : "Delete account"}</button></footer></section></div>}
     </section>
   );
 }

@@ -4,7 +4,17 @@ import { ZodError } from "zod";
 import { AuthenticationError, AuthorizationError } from "@/lib/auth";
 import { RateLimitError } from "@/lib/rate-limit";
 
+export class RequestError extends Error {
+  constructor(message: string, readonly status = 400) {
+    super(message);
+    this.name = "RequestError";
+  }
+}
+
 export function toErrorResponse(error: unknown) {
+  if (error instanceof RequestError) {
+    return NextResponse.json({ error: error.message }, { status: error.status });
+  }
   if (error instanceof ZodError) {
     return NextResponse.json(
       { error: "Invalid request.", details: error.flatten() },

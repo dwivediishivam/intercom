@@ -33,6 +33,21 @@ function addressLocalPart(address: string) {
   return address.trim().toLowerCase().split("@")[0];
 }
 
+function escapeEmailHtml(value: string) {
+  return value.replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  })[character] ?? character);
+}
+
+function replyBodyHtml(bodyText: string, bodyHtml?: string) {
+  if (bodyHtml?.trim()) return stripUnsafeEmailHtml(bodyHtml);
+  return `<p style="margin:0;white-space:pre-wrap">${escapeEmailHtml(bodyText)}</p>`;
+}
+
 async function findWorkspaceForRecipients(recipients: string[]) {
   const admin = createAdminClient();
   const localParts = recipients.map(addressLocalPart);
@@ -228,7 +243,7 @@ export async function sendEmailReply({
   }
   const { data: workspace, error: workspaceError } = await admin
     .from("workspaces")
-    .select("slug, support_email_local_part")
+    .select("name, slug, support_email_local_part")
     .eq("id", conversation.workspace_id)
     .single();
   if (workspaceError || !workspace) throw workspaceError ?? new Error("Workspace not found.");
@@ -236,13 +251,17 @@ export async function sendEmailReply({
   const inboxLocalPart = workspace.support_email_local_part || workspace.slug;
   const replyAddress = `${inboxLocalPart}@${sendingDomain}`;
   const outboundMessageId = `platform-${messageId}@${sendingDomain}`;
+  const workspaceName = workspace.name.trim() || "Support";
+  const renderedBody = replyBodyHtml(bodyText, bodyHtml);
+  const renderedText = `${bodyText.trim()}\n\n— ${workspaceName} team\n\nReply directly to this email to continue the conversation.`;
+  const renderedHtml = `<div style="margin:0;padding:32px 18px;background:#f7f5f1;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#1d1d1b"><table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center"><table role="presentation" width="100%" style="max-width:620px;overflow:hidden;border:1px solid #e0ddd7;border-radius:12px;background:#fff"><tr><td style="padding:20px 26px;background:#1d1d1b;color:#fff"><div style="display:inline-block;width:26px;height:26px;line-height:26px;border-radius:7px;background:#c05a37;text-align:center;font-family:Georgia,serif;font-weight:700">i</div><span style="margin-left:8px;font-weight:700">${escapeEmailHtml(workspaceName)} support</span></td></tr><tr><td style="padding:28px 26px;font-size:15px;line-height:1.65">${renderedBody}</td></tr><tr><td style="padding:17px 26px;border-top:1px solid #ece9e3;color:#747069;font-size:12px;line-height:1.55"><strong style="color:#36332f">— ${escapeEmailHtml(workspaceName)} team</strong><br />Reply directly to this email to continue the conversation.</td></tr></table></td></tr></table></div>`;
   const { data, error } = await resend.emails.send({
-    from: environment.RESEND_FROM_EMAIL,
+    from: `${workspaceName} team <${environment.RESEND_FROM_EMAIL}>`,
     replyTo: replyAddress,
     to: [contact.email],
     subject,
-    text: bodyText,
-    html: bodyHtml,
+    text: renderedText,
+    html: renderedHtml,
     headers: {
       "Message-ID": `<${outboundMessageId}>`,
       ...(replyTo ? { "In-Reply-To": `<${replyTo}>` } : {}),
