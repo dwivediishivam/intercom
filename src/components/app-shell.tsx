@@ -102,7 +102,7 @@ export function AppShell({
         if (view === "breaching") return item.sla.state === "breached";
         if (view === "mine") return item.assignee?.name === initialWorkspace.currentUser.name && item.priority === "urgent";
         if (view === "unassigned") return item.channel === "chat" && item.assignee === null;
-        if (view === "awaiting") return item.status === "snoozed";
+        if (view === "awaiting") return Boolean(item.awaitingCustomer) && item.status === "open";
         return true;
       })
       .filter((item) =>

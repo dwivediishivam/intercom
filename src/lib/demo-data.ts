@@ -20,6 +20,8 @@ export type DemoConversation = {
   tag: string;
   updatedLabel: string;
   unread: boolean;
+  /** The latest durable message is from an agent or the support assistant. */
+  awaitingCustomer?: boolean;
   priority?: "urgent";
   sla: { label: string; state: SlaState };
 };

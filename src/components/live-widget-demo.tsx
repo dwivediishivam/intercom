@@ -9,7 +9,6 @@ export function LiveWidgetDemo() {
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [workspaceInput, setWorkspaceInput] = useState("");
   const [message, setMessage] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     const requestedWorkspace = new URLSearchParams(window.location.search).get("workspace")?.trim() ?? "";
@@ -45,18 +44,6 @@ export function LiveWidgetDemo() {
     setWorkspaceId(requested);
   }
 
-  async function copySnippet() {
-    if (!workspaceId) return;
-    const snippet = `<script async src="${window.location.origin}/widget.js" data-workspace="${workspaceId}"></script>`;
-    try {
-      await navigator.clipboard.writeText(snippet);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1800);
-    } catch {
-      setMessage("Clipboard access was blocked. Copy the install snippet from Widget install in the dashboard.");
-    }
-  }
-
   if (!workspaceId) {
     return <main className="widget-demo-setup">
       <nav className="widget-demo-setup__nav"><a href="/" className="landing-brand"><span>i</span>Intercom</a><a href="/login">Sign in</a></nav>
@@ -79,8 +66,8 @@ export function LiveWidgetDemo() {
     <section>
       <span className="eyebrow">NORTHSTAR COLLECTIVE</span>
       <h1>Support that feels close, wherever your customers are.</h1>
-      <p>This is an independent customer-facing page with your live Intercom script installed. Open the launcher in the lower-right, send a message, then refresh your signed-in inbox to see it arrive.</p>
-      <div className="live-widget-host__actions"><button onClick={copySnippet}>{copied ? "Snippet copied" : "Copy install snippet"}</button><a href="/app">View unified inbox</a></div>
+      <p>This is an independent customer-facing page with your live Intercom script installed. Open the launcher in the lower-right, send a message, and the support assistant will reply immediately. The conversation then appears in the connected inbox.</p>
+      <div className="live-widget-host__actions"><a href="/app">View unified inbox</a></div>
     </section>
     <aside id="how-it-works" className="live-widget-host__guide"><span>01 · Message from this page</span><span>02 · It becomes a chat conversation</span><span>03 · Reply from the dashboard</span></aside>
     <footer><code>{`data-workspace="${workspaceId}"`}</code><span>Messages and chat history use the connected workspace—not a mock dataset.</span></footer>

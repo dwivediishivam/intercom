@@ -59,7 +59,7 @@ async function getWorkspaceView() {
     const [{ data: conversations, error: conversationsError }, { data: members, error: membersError }] = await Promise.all([
       supabase
         .from("conversations")
-        .select("id, contact_id, channel, status, subject, assignee_id, priority, last_message_at, last_message_preview")
+        .select("id, contact_id, channel, status, subject, assignee_id, priority, last_message_at, last_message_preview, first_customer_message_at, first_agent_reply_at, resolved_at")
         .eq("workspace_id", workspace.id)
         .order("last_message_at", { ascending: false, nullsFirst: false })
         .limit(100),
@@ -92,16 +92,36 @@ async function getWorkspaceView() {
       : { data: [], error: null };
     if (contactsError) throw contactsError;
     const contactById = new Map((contacts ?? []).map((contact) => [contact.id, contact]));
+    const conversationIds = (conversations ?? []).map((conversation) => conversation.id);
+    const { data: recentMessages, error: recentMessagesError } = conversationIds.length
+      ? await supabase
+          .from("messages")
+          .select("conversation_id, sender_type, sent_at")
+          .in("conversation_id", conversationIds)
+          .order("sent_at", { ascending: false })
+          .limit(500)
+      : { data: [], error: null };
+    if (recentMessagesError) throw recentMessagesError;
+    const latestSenderByConversation = new Map<string, string>();
+    for (const message of recentMessages ?? []) {
+      if (!latestSenderByConversation.has(message.conversation_id)) {
+        latestSenderByConversation.set(message.conversation_id, message.sender_type);
+      }
+    }
 
     const initialConversations: DemoConversation[] = (conversations ?? []).map((conversation, index) => {
       const contact = contactById.get(conversation.contact_id);
       const contactName = contact?.name || "Website visitor";
       const priority = conversation.priority >= 2 ? "urgent" : undefined;
-      const staleForMinutes = conversation.last_message_at ? (Date.now() - new Date(conversation.last_message_at).getTime()) / 60_000 : 0;
+      const waitingForFirstReplyMinutes = conversation.first_customer_message_at && !conversation.first_agent_reply_at
+        ? (Date.now() - new Date(conversation.first_customer_message_at).getTime()) / 60_000
+        : 0;
       const sla = conversation.status === "resolved"
         ? { label: "Resolved", state: "met" as const }
-        : priority || staleForMinutes > 240
-          ? { label: "Needs attention", state: "breached" as const }
+        : waitingForFirstReplyMinutes > 240
+          ? { label: "First reply overdue", state: "breached" as const }
+          : priority
+            ? { label: "Priority attention", state: "at-risk" as const }
           : { label: "On track", state: "met" as const };
       return {
         id: conversation.id,
@@ -125,6 +145,7 @@ async function getWorkspaceView() {
         tag: conversation.channel === "email" ? "Email" : "Live chat",
         updatedLabel: updatedLabel(conversation.last_message_at),
         unread: false,
+        awaitingCustomer: ["agent", "ai"].includes(latestSenderByConversation.get(conversation.id) ?? ""),
         priority,
         sla,
       };
