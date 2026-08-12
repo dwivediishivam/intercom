@@ -333,7 +333,14 @@ export async function generateWidgetAutoReply({
     // article contains the answer. Prefer the grounded local rendering in that
     // case so the visitor receives useful help immediately.
     const providerDeclinedKnownAnswer = Boolean(article && providerReply && /doesn.?t (include|cover|have)|teammate will follow up|cannot find/i.test(providerReply));
-    const reply = !providerDeclinedKnownAnswer && providerReply ? providerReply : fallbackReply(message, article);
+    let reply = !providerDeclinedKnownAnswer && providerReply ? providerReply : fallbackReply(message, article);
+    // Product identity is important in a first message. Preserve the model's
+    // grounded response, but guarantee that a greeting names the workspace.
+    const normalizedWorkspaceName = (workspace?.name ?? "").replace(/[^a-z0-9]/gi, "").toLowerCase();
+    const normalizedReply = reply.replace(/[^a-z0-9]/gi, "").toLowerCase();
+    if (greetingMode && workspace?.name && normalizedWorkspaceName && !normalizedReply.includes(normalizedWorkspaceName)) {
+      reply = `Welcome to ${workspace.name}! ${reply}`;
+    }
     await recordAiUsage({ workspaceId, conversationId, feature: "reply_draft", model: generated?.model ?? `${getServerEnvironment().OPENAI_MODEL}:fallback`, inputTokens: generated?.inputTokens ?? 0, outputTokens: generated?.outputTokens ?? 0 });
     return { reply, usedFallback: !providerReply || providerDeclinedKnownAnswer, escalated };
   } catch (error) {
