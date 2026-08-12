@@ -68,6 +68,14 @@ function greetingInstructions(value: unknown) {
   return typeof instructions === "string" ? instructions.trim().slice(0, 1500) : "";
 }
 
+function fallbackGreeting(workspaceName: string | undefined, instructions: string) {
+  const productDescription = instructions.match(/briefly explain that\s+(.+?)(?:\.|$)/i)?.[1]?.trim();
+  const productSentence = productDescription
+    ? `${productDescription[0].toUpperCase()}${productDescription.slice(1)}${/[.!?]$/.test(productDescription) ? "" : "."}`
+    : "I’m here to help you find the right answer.";
+  return `Hi! Welcome to ${workspaceName ?? "our support team"}. ${productSentence} What would you like help with?`;
+}
+
 function shouldEscalate(message: string) {
   return /\b(human|agent|person|refund|cancel|chargeback|billing|payment|invoice|security|privacy|legal|urgent|critical|broken|bug|error|not working|complaint)\b/i.test(message);
 }
@@ -308,24 +316,26 @@ export async function generateWidgetAutoReply({
   ]);
   if (error) throw error;
   if (workspaceError) throw workspaceError;
+  const greetingMode = isSimpleGreeting(message);
+  const greetingGuidance = greetingInstructions(workspace?.brand_settings);
   const terms = message.toLowerCase().match(/[a-z0-9]{4,}/g) ?? [];
-  const article = (articles ?? []).sort((left, right) => {
+  const article = greetingMode ? undefined : (articles ?? []).sort((left, right) => {
     const score = (entry: typeof left) => terms.reduce((total, term) => total + (`${entry.title} ${entry.excerpt ?? ""} ${entry.content_html}`.toLowerCase().includes(term) ? 1 : 0), 0);
     return score(right) - score(left);
   })[0];
   const client = getOpenAIClient();
-  if (!client) return { reply: fallbackReply(message, article), usedFallback: true, escalated };
+  if (!client) return { reply: greetingMode ? fallbackGreeting(workspace?.name, greetingGuidance) : fallbackReply(message, article), usedFallback: true, escalated };
 
   try {
     await assertAiQuota(workspaceId);
     const knowledge = article ? `Relevant article:\n${article.title}\n${(article.excerpt ?? article.content_html.replace(/<[^>]+>/g, " ")).slice(0, 900)}` : "No matching published help article.";
-    const greetingGuidance = greetingInstructions(workspace?.brand_settings);
-    const greetingMode = isSimpleGreeting(message);
     const generated = await requestText({
       instructions: greetingMode
         ? "You are a customer-support assistant. This is a simple greeting. Reply warmly in 55 tokens or fewer, introduce the product accurately from the workspace greeting instructions, then ask how you can help. Do not invent capabilities, add a signature, markdown, or labels."
         : "You are a customer-support assistant. Answer the visitor directly in 90 tokens or fewer, using only the supplied help article and their message. Never invent policy or claim a fix. If the issue needs a human, say that a teammate will follow up and ask for the minimum needed detail. No greeting, signature, markdown, or labels.",
-      input: `Workspace: ${workspace?.name ?? "Support team"}\n${greetingMode ? `Workspace greeting instructions:\n${greetingGuidance || "Warmly welcome the visitor, briefly explain the product only if known, then ask what they need help with."}\n\n` : ""}Visitor message:\n${message.slice(0, MAX_MESSAGE_CHARS)}\n\n${knowledge}`,
+      input: greetingMode
+        ? `Workspace: ${workspace?.name ?? "Support team"}\nWorkspace greeting instructions:\n${greetingGuidance || "Warmly welcome the visitor, briefly explain the product only if known, then ask what they need help with."}\n\nVisitor message:\n${message.slice(0, MAX_MESSAGE_CHARS)}`
+        : `Workspace: ${workspace?.name ?? "Support team"}\nVisitor message:\n${message.slice(0, MAX_MESSAGE_CHARS)}\n\n${knowledge}`,
       maxOutputTokens: 130,
     });
     const providerReply = generated?.text;
@@ -333,7 +343,7 @@ export async function generateWidgetAutoReply({
     // article contains the answer. Prefer the grounded local rendering in that
     // case so the visitor receives useful help immediately.
     const providerDeclinedKnownAnswer = Boolean(article && providerReply && /doesn.?t (include|cover|have)|teammate will follow up|cannot find/i.test(providerReply));
-    let reply = !providerDeclinedKnownAnswer && providerReply ? providerReply : fallbackReply(message, article);
+    let reply = !providerDeclinedKnownAnswer && providerReply ? providerReply : greetingMode ? fallbackGreeting(workspace?.name, greetingGuidance) : fallbackReply(message, article);
     // Product identity is important in a first message. Preserve the model's
     // grounded response, but guarantee that a greeting names the workspace.
     const normalizedWorkspaceName = (workspace?.name ?? "").replace(/[^a-z0-9]/gi, "").toLowerCase();
@@ -345,6 +355,6 @@ export async function generateWidgetAutoReply({
     return { reply, usedFallback: !providerReply || providerDeclinedKnownAnswer, escalated };
   } catch (error) {
     console.warn("Widget AI reply failed; using a safe fallback.", error);
-    return { reply: fallbackReply(message, article), usedFallback: true, escalated };
+    return { reply: greetingMode ? fallbackGreeting(workspace?.name, greetingGuidance) : fallbackReply(message, article), usedFallback: true, escalated };
   }
 }

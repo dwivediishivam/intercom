@@ -85,7 +85,7 @@ export function LiveWidgetDemo() {
       <span className="eyebrow">{workspaceName.toUpperCase()}</span>
       <h1>Support that feels close, wherever your customers are.</h1>
       <p>Use the support chat already open in the lower-right. Send a message and the assistant will reply immediately; the same conversation appears in the connected inbox.</p>
-      <div className="live-widget-host__actions"><a href="/app">View unified inbox</a></div>
+      <div className="live-widget-host__actions"><a href="/app">View unified inbox</a><a href={`/help?workspace=${encodeURIComponent(workspaceId)}`} target="_blank" rel="noreferrer">Browse {workspaceName} articles ↗</a></div>
     </section>
     <aside id="how-it-works" className="live-widget-host__guide"><span>01 · Message from this page</span><span>02 · It becomes a chat conversation</span><span>03 · Reply from the dashboard</span></aside>
     {message && <div className="toast" role="status"><span className="toast__dot" />{message}<button onClick={() => setMessage(null)}>×</button></div>}
