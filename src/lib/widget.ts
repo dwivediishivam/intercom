@@ -126,6 +126,18 @@ export async function bootstrapVisitor({
     : { data: [], error: null };
   if (messagesError) throw messagesError;
 
+  // The visitor has this chat open, so agent chat messages are now read. This
+  // drives a durable receipt in the inbox without relying on client memory.
+  if (conversation) {
+    const { error: readError } = await admin
+      .from("messages")
+      .update({ delivery_status: "read" })
+      .eq("conversation_id", conversation.id)
+      .eq("sender_type", "agent")
+      .in("delivery_status", ["pending", "sent", "delivered"]);
+    if (readError) throw readError;
+  }
+
   return {
     workspaceId: workspace.id,
     workspaceName: workspace.name,
@@ -218,4 +230,39 @@ export async function sendVisitorMessage({
   });
 
   return { conversationId: activeConversationId, message, visitorToken: visitor.visitorToken };
+}
+
+/** Stores a short-lived typing marker with the visitor session. Durable messages remain the source of truth. */
+export async function setVisitorTyping({
+  workspacePublicId,
+  visitorToken,
+  conversationId,
+  typing,
+  requestOrigin,
+}: {
+  workspacePublicId: string;
+  visitorToken: string;
+  conversationId?: string;
+  typing: boolean;
+  requestOrigin: string | null;
+}) {
+  const visitor = await bootstrapVisitor({ workspacePublicId, visitorToken, requestOrigin });
+  if (!visitor.conversation?.id || (conversationId && conversationId !== visitor.conversation.id)) {
+    return { active: false };
+  }
+  const admin = createAdminClient();
+  const { data: session, error: sessionError } = await admin
+    .from("visitor_sessions")
+    .select("metadata")
+    .eq("id", visitor.visitorSessionId)
+    .single();
+  if (sessionError) throw sessionError;
+  const metadata = (session.metadata && typeof session.metadata === "object" ? session.metadata : {}) as Record<string, unknown>;
+  const typingUntil = typing ? new Date(Date.now() + 7_000).toISOString() : null;
+  const { error } = await admin
+    .from("visitor_sessions")
+    .update({ metadata: { ...metadata, typing_until: typingUntil } })
+    .eq("id", visitor.visitorSessionId);
+  if (error) throw error;
+  return { active: Boolean(typingUntil), typingUntil };
 }

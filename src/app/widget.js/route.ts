@@ -15,6 +15,7 @@ const widgetSource = String.raw`(() => {
   let messages = [];
   let isOpen = false;
   let isSending = false;
+  let lastTypingSignal = 0;
 
   const host = document.createElement("div");
   host.setAttribute("data-intercom-widget", "");
@@ -97,6 +98,14 @@ const widgetSource = String.raw`(() => {
     } catch (_) { /* Suggestions are optional and must never block chatting. */ }
   }
 
+  function signalTyping(active) {
+    if (!visitorToken || !conversationId) return;
+    const now = Date.now();
+    if (active && now - lastTypingSignal < 1800) return;
+    lastTypingSignal = now;
+    request("/api/widget/typing", { method: "POST", body: JSON.stringify({ workspacePublicId, visitorToken, conversationId, typing: active }) }).catch(() => {});
+  }
+
   async function bootstrap(includePage) {
     const page = includePage ? { url: window.location.href, title: document.title, ...(document.referrer ? { referrer: document.referrer } : {}) } : undefined;
     const payload = await request("/api/widget/bootstrap", { method: "POST", body: JSON.stringify({ workspacePublicId, ...(visitorToken ? { visitorToken } : {}), ...(page ? { page } : {}) }) });
@@ -118,7 +127,7 @@ const widgetSource = String.raw`(() => {
 
   launcher.addEventListener("click", () => setOpen(true));
   close.addEventListener("click", () => setOpen(false));
-  input.addEventListener("input", () => suggest(input.value));
+  input.addEventListener("input", () => { suggest(input.value); signalTyping(Boolean(input.value.trim())); });
   form.addEventListener("submit", async event => {
     event.preventDefault();
     const bodyText = input.value.trim();
@@ -131,6 +140,7 @@ const widgetSource = String.raw`(() => {
       visitorToken = payload.visitorToken || visitorToken;
       window.localStorage.setItem(storageKey, visitorToken);
       input.value = "";
+      signalTyping(false);
       await refresh();
     } catch (error) {
       renderError(error instanceof Error ? error.message : "Message could not be sent.");

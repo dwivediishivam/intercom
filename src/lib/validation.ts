@@ -38,6 +38,13 @@ export const widgetMessageSchema = z.object({
   clientMessageId: uuidSchema,
 });
 
+export const widgetTypingSchema = z.object({
+  workspacePublicId: uuidSchema,
+  visitorToken: z.string().min(32).max(256),
+  conversationId: uuidSchema.optional(),
+  typing: z.boolean(),
+});
+
 export const widgetBootstrapSchema = z.object({
   workspacePublicId: uuidSchema,
   visitorToken: z.string().min(32).max(256).optional(),

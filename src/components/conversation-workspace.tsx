@@ -98,8 +98,10 @@ export function ConversationWorkspace({ conversation, onBack, onToast, onResolve
   const [cannedResponses, setCannedResponses] = useState<CannedResponse[]>([]);
   const [contactTimeline, setContactTimeline] = useState<ContactTimeline | null>(null);
   const [liveSla, setLiveSla] = useState<LiveSla | null>(null);
+  const [contactPresence, setContactPresence] = useState<{ online: boolean; typing: boolean } | null>(null);
   const [assignmentSaving, setAssignmentSaving] = useState(false);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  const summarizedConversationRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (isDemo) return;
@@ -150,6 +152,21 @@ export function ConversationWorkspace({ conversation, onBack, onToast, onResolve
     }
     return () => { active = false; };
   }, [conversation.contactId, conversation.id, isDemo, onToast, workspaceId]);
+
+  useEffect(() => {
+    if (isDemo) return;
+    let active = true;
+    const updatePresence = async () => {
+      try {
+        const response = await fetch(`/api/conversations/${conversation.id}/presence`);
+        const payload = await response.json() as { online?: boolean; typing?: boolean };
+        if (response.ok && active) setContactPresence({ online: Boolean(payload.online), typing: Boolean(payload.typing) });
+      } catch { /* Presence is deliberately non-blocking. */ }
+    };
+    void updatePresence();
+    const interval = window.setInterval(() => void updatePresence(), 3500);
+    return () => { active = false; window.clearInterval(interval); };
+  }, [conversation.id, isDemo]);
 
   async function sendMessage() {
     const body = draft.trim();
@@ -210,6 +227,14 @@ export function ConversationWorkspace({ conversation, onBack, onToast, onResolve
       setSummaryLoading(false);
     }
   }
+
+  // The ref makes this a once-per-conversation threshold transition, not an effect on the callback identity.
+  useEffect(() => {
+    if (isDemo || messages.length < 4 || summarizedConversationRef.current === conversation.id) return;
+    summarizedConversationRef.current = conversation.id;
+    void createSummary();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversation.id, isDemo, messages.length]); // Deliberately summaries only substantive threads.
 
   async function createDraft() {
     setDraftLoading(true);
@@ -297,7 +322,7 @@ export function ConversationWorkspace({ conversation, onBack, onToast, onResolve
             ))}
           </div>
 
-          {isDemo && <div className="typing-indicator"><span /><span /><span /> {conversation.name.split(" ")[0]} is typing</div>}
+          {(isDemo || contactPresence?.typing) && <div className="typing-indicator"><span /><span /><span /> {conversation.name.split(" ")[0]} is typing</div>}
 
           <div className="composer">
             <div className="composer__tabs">
@@ -333,7 +358,7 @@ export function ConversationWorkspace({ conversation, onBack, onToast, onResolve
               <span className={`avatar avatar--${conversation.avatarTone}`}>{conversation.initials}</span>
               <strong>{conversation.name}</strong>
               <a href={`mailto:${conversation.email}`}>{conversation.email}</a>
-              <span>{conversation.location} · Last seen {isDemo ? "2m ago" : relativeTime(contactTimeline?.contact.last_seen_at ?? null)}</span>
+              <span>{conversation.location} · {isDemo ? "Last seen 2m ago" : contactPresence?.online ? "Online now" : `Last seen ${relativeTime(contactTimeline?.contact.last_seen_at ?? null)}`}</span>
             </div>
           </section>
           <section>
