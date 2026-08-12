@@ -7,6 +7,7 @@ const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}
 /** A real external-host simulation for the embeddable widget. */
 export function LiveWidgetDemo() {
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
+  const [workspace, setWorkspace] = useState<{ name: string; slug: string } | null>(null);
   const [workspaceInput, setWorkspaceInput] = useState("");
   const [message, setMessage] = useState<string | null>(null);
 
@@ -33,6 +34,19 @@ export function LiveWidgetDemo() {
       script.remove();
       document.querySelector("[data-intercom-widget]")?.remove();
     };
+  }, [workspaceId]);
+
+  useEffect(() => {
+    if (!workspaceId) return;
+    let active = true;
+    void fetch(`/api/public/workspaces/${workspaceId}`)
+      .then(async (response) => {
+        const payload = await response.json() as { workspace?: { name: string; slug: string } };
+        if (!response.ok || !payload.workspace) throw new Error("Workspace could not be loaded.");
+        if (active) setWorkspace(payload.workspace);
+      })
+      .catch(() => { if (active) setWorkspace(null); });
+    return () => { active = false; };
   }, [workspaceId]);
 
   function beginDemo(event: FormEvent<HTMLFormElement>) {
@@ -64,10 +78,11 @@ export function LiveWidgetDemo() {
     </main>;
   }
 
+  const workspaceName = workspace?.name ?? "Your team";
   return <main className="live-widget-host">
-    <nav><a href="/" className="live-widget-host__brand"><i>i</i>Intercom</a><span className="live-widget-host__label">Widget test site</span><a href="#how-it-works">How it works</a><a href="/app">Open inbox</a></nav>
+    <nav><a href="/" className="live-widget-host__brand"><i>i</i>Intercom</a><span className="live-widget-host__label">{workspaceName} widget demo</span><a href="#how-it-works">How it works</a><a href="/app">Open inbox</a></nav>
     <section>
-      <span className="eyebrow">NORTHSTAR COLLECTIVE</span>
+      <span className="eyebrow">{workspaceName.toUpperCase()}</span>
       <h1>Support that feels close, wherever your customers are.</h1>
       <p>Use the support chat already open in the lower-right. Send a message and the assistant will reply immediately; the same conversation appears in the connected inbox.</p>
       <div className="live-widget-host__actions"><a href="/app">View unified inbox</a></div>

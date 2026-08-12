@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 
 type Notice = (message: string) => void;
-type SettingsTab = "team" | "workspace" | "email" | "widget" | "domains" | "developers" | "account";
+type SettingsTab = "team" | "workspace" | "email" | "widget" | "domains" | "developers" | "ai" | "account";
 
 type WorkspaceMember = { id: string; name: string; initials: string; role: string; location: string; tone: "current" | "sage" | "sand" | "peach" };
 type PendingInvitation = { id: string; email: string; role: "admin" | "agent"; expires_at: string; created_at: string };
@@ -104,11 +104,13 @@ export function SettingsSurface({ onToast, workspaceId, workspacePublicId, works
   const [webhookUrl, setWebhookUrl] = useState("");
   const [cannedTitle, setCannedTitle] = useState("");
   const [cannedBody, setCannedBody] = useState("");
+  const [greetingInstructions, setGreetingInstructions] = useState("");
+  const [savingGreetingInstructions, setSavingGreetingInstructions] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
   const [deleting, setDeleting] = useState(false);
-  const content = { team: "Team", workspace: "Workspace", email: "Email channel", widget: "Widget install", domains: "Custom domain", developers: "Developers", account: "Account" };
-  const availableTabs = (Object.keys(content) as SettingsTab[]).filter((key) => isAdmin || !["domains", "developers"].includes(key));
+  const content = { team: "Team", workspace: "Workspace", email: "Email channel", widget: "Widget install", domains: "Custom domain", developers: "Developers", ai: "AI assistant", account: "Account" };
+  const availableTabs = (Object.keys(content) as SettingsTab[]).filter((key) => isAdmin || !["domains", "developers", "ai"].includes(key));
   const widgetSnippet = `<script async\n  src="${appUrl || "https://your-app.vercel.app"}/widget.js"\n  data-workspace="${workspacePublicId ?? "your-workspace-public-id"}">\n</script>`;
   async function copyText(value: string, confirmation: string) {
     try {
@@ -151,6 +153,18 @@ export function SettingsSurface({ onToast, workspaceId, workspacePublicId, works
         if (active) setPendingInvitations(payload.invitations ?? []);
       })
       .catch((error: unknown) => { if (active) onToast(error instanceof Error ? error.message : "Pending invitations could not be loaded."); });
+    return () => { active = false; };
+  }, [isAdmin, onToast, workspaceId]);
+  useEffect(() => {
+    if (!workspaceId || !isAdmin) return;
+    let active = true;
+    void fetch(`/api/workspaces/${workspaceId}/ai-instructions`)
+      .then(async (response) => {
+        const payload = await response.json() as { greetingInstructions?: string; error?: string };
+        if (!response.ok) throw new Error(payload.error ?? "AI instructions could not be loaded.");
+        if (active) setGreetingInstructions(payload.greetingInstructions ?? "");
+      })
+      .catch((error: unknown) => { if (active) onToast(error instanceof Error ? error.message : "AI instructions could not be loaded."); });
     return () => { active = false; };
   }, [isAdmin, onToast, workspaceId]);
   async function invite(event: FormEvent<HTMLFormElement>) {
@@ -270,6 +284,22 @@ export function SettingsSurface({ onToast, workspaceId, workspacePublicId, works
       onToast("Canned response saved. It is available in every conversation composer.");
     } catch (error) { onToast(error instanceof Error ? error.message : "Canned response could not be saved."); }
   }
+  async function saveGreetingInstructions(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!workspaceId) return;
+    setSavingGreetingInstructions(true);
+    try {
+      const response = await fetch(`/api/workspaces/${workspaceId}/ai-instructions`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ greetingInstructions }) });
+      const payload = await response.json() as { greetingInstructions?: string; error?: string };
+      if (!response.ok) throw new Error(payload.error ?? "AI instructions could not be saved.");
+      setGreetingInstructions(payload.greetingInstructions ?? greetingInstructions);
+      onToast("AI greeting instructions saved.");
+    } catch (error) {
+      onToast(error instanceof Error ? error.message : "AI instructions could not be saved.");
+    } finally {
+      setSavingGreetingInstructions(false);
+    }
+  }
   async function signOut() {
     const { error } = await createBrowserSupabaseClient().auth.signOut();
     if (error) { onToast(error.message); return; }
@@ -292,6 +322,7 @@ export function SettingsSurface({ onToast, workspaceId, workspacePublicId, works
       setDeleting(false);
     }
   }
+  if (tab === "ai") return <section className="content-surface settings-surface" aria-label="Workspace settings"><header className="content-header"><div><span className="eyebrow">SETTINGS</span><h1>Make the workspace yours.</h1><p>Set up access, communication channels, custom domains, and developer integrations.</p></div></header><div className="settings-layout"><nav className="settings-tabs" aria-label="Settings sections">{availableTabs.map((key) => <button key={key} className={tab === key ? "settings-tabs__active" : ""} onClick={() => setTab(key)}>{content[key]}</button>)}</nav><div className="settings-panel"><section><SettingsHeading kicker="AI ASSISTANT" title="Make the first reply sound like your team." /><div className="setup-card"><span className="panel-label">GREETING INSTRUCTIONS</span><h3>Guide the assistant when a visitor says hello.</h3><p>Use this for the welcome, a concise explanation of your product, and the first question the assistant should ask. The assistant still uses only your published knowledge base for support answers.</p><form className="settings-form" onSubmit={saveGreetingInstructions}><label>Instructions for the assistant<textarea value={greetingInstructions} onChange={(event) => setGreetingInstructions(event.target.value)} maxLength={1500} placeholder={`For a simple greeting, welcome visitors to ${workspaceName}, explain what we help with in one sentence, then ask what they need.`} /></label><button className="button button--primary" disabled={savingGreetingInstructions}>{savingGreetingInstructions ? "Saving…" : "Save instructions"}</button></form></div></section></div></div></section>;
   return (
     <section className="content-surface settings-surface" aria-label="Workspace settings"><header className="content-header"><div><span className="eyebrow">SETTINGS</span><h1>Make the workspace yours.</h1><p>Set up access, communication channels, custom domains, and developer integrations.</p></div></header><div className="settings-layout"><nav className="settings-tabs" aria-label="Settings sections">{availableTabs.map((key) => <button key={key} className={tab === key ? "settings-tabs__active" : ""} onClick={() => setTab(key)}>{content[key]}</button>)}</nav><div className="settings-panel">
       {tab === "team" && <section><SettingsHeading kicker="PEOPLE AND ACCESS" title="A small team with clear ownership." action={isAdmin ? <button className="button button--primary" onClick={() => setInviteOpen(true)}>Invite teammate</button> : undefined} /><div className="member-list">{team.length ? team.map((member) => <div key={member.id}><i className={`avatar avatar--${member.tone}`}>{member.initials}</i><span><strong>{member.name}</strong><small>{member.location}</small></span><select aria-label={`Role for ${member.name}`} value={member.role} disabled={!isAdmin || member.id.startsWith("pending-")} onChange={(event) => void updateMemberRole(member, event.target.value)}><option>Admin</option><option>Agent</option></select></div>) : <p className="settings-note">Your first teammate will appear here after they accept an invitation.</p>}{pendingInvitations.map((invitation) => { const name = invitation.email.split("@")[0].split(/[._-]/).filter(Boolean).map((part) => part[0].toUpperCase() + part.slice(1)).join(" "); return <div key={`pending-${invitation.id}`}><i className="avatar avatar--peach">{name.split(" ").map((part) => part[0]).join("").slice(0, 2)}</i><span><strong>{name || invitation.email}</strong><small>{invitation.email} · Invitation pending</small></span><b>{invitation.role === "admin" ? "Admin" : "Agent"}</b></div>; })}</div><p className="settings-note">Invitations remain listed here until accepted or expiry. Admins can invite people, change workspace settings, and manage developer credentials. Agents can work with customer conversations.</p></section>}

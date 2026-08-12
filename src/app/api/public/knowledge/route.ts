@@ -3,19 +3,25 @@ import { z } from "zod";
 
 import { toErrorResponse } from "@/lib/http";
 import { searchPublicKnowledgeBase } from "@/lib/knowledge";
-import { getPublicKnowledgeHome, resolvePublicKnowledgeWorkspace } from "@/lib/public-knowledge";
+import { getPublicKnowledgeHome, resolvePublicKnowledgeWorkspace, resolvePublicKnowledgeWorkspaceByPublicId } from "@/lib/public-knowledge";
 
-const querySchema = z.object({ query: z.string().trim().max(300).optional() });
+const querySchema = z.object({
+  query: z.string().trim().max(300).optional(),
+  workspace: z.string().uuid().optional(),
+});
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
   try {
+    const { query, workspace } = querySchema.parse(Object.fromEntries(request.nextUrl.searchParams));
     const hostname = request.headers.get("host");
-    if (!hostname) return NextResponse.json({ error: "Host is required." }, { status: 400 });
-    const workspaceId = await resolvePublicKnowledgeWorkspace(hostname);
+    const workspaceId = workspace
+      ? await resolvePublicKnowledgeWorkspaceByPublicId(workspace)
+      : hostname
+        ? await resolvePublicKnowledgeWorkspace(hostname)
+        : null;
     if (!workspaceId) return NextResponse.json({ error: "Knowledge base not found." }, { status: 404 });
-    const { query } = querySchema.parse(Object.fromEntries(request.nextUrl.searchParams));
     if (query) {
       return NextResponse.json({ articles: await searchPublicKnowledgeBase({ workspaceId, query }) });
     }

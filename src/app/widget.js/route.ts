@@ -14,6 +14,7 @@ const widgetSource = String.raw`(() => {
   let visitorToken = window.localStorage.getItem(storageKey) || "";
   let conversationId = "";
   let messages = [];
+  let suggestedArticles = [];
   let isOpen = false;
   let isSending = false;
   let lastTypingSignal = 0;
@@ -23,9 +24,9 @@ const widgetSource = String.raw`(() => {
   const shadow = host.attachShadow({ mode: "open" });
   shadow.innerHTML =
     '<style>' +
-    ':host{all:initial}*{box-sizing:border-box}.launcher{position:fixed;right:22px;bottom:22px;width:54px;height:54px;border:0;border-radius:50%;color:#fff;background:#c05a37;box-shadow:0 12px 30px rgba(28,24,18,.24);cursor:pointer;font:700 24px/1 Georgia,serif}.launcher:hover{transform:translateY(-1px)}.launcher::after{position:absolute;top:4px;right:4px;width:9px;height:9px;content:"";border:2px solid #fff;border-radius:50%;background:#1f8b5c}.panel{position:fixed;right:22px;bottom:22px;width:min(360px,calc(100vw - 36px));overflow:hidden;border:1px solid #e5e4e0;border-radius:12px;background:#fff;box-shadow:0 18px 46px rgba(28,24,18,.24);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#1b1b1a}.panel[hidden],.launcher[hidden]{display:none}.header{display:flex;align-items:center;justify-content:space-between;padding:14px;color:#fff;background:#1b1b1a}.identity{display:flex;align-items:center;gap:8px}.mark{width:27px;height:27px;display:grid;place-items:center;border-radius:7px;background:#c05a37;font:700 15px/1 Georgia,serif}.identity strong,.identity span{display:block}.identity strong{font-size:12px}.identity span{margin-top:2px;color:#d7d5d0;font-size:10px}.online{display:inline-block;width:6px;height:6px;margin-right:4px;border-radius:50%;background:#69c68d}.close{border:0;color:#d7d5d0;background:transparent;cursor:pointer;font-size:21px}.messages{min-height:276px;max-height:48vh;overflow:auto;padding:13px;background:#f8f7f5}.bubble{max-width:84%;margin:7px 0;padding:9px 10px;border-radius:4px 9px 9px;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.05);font-size:12px;line-height:1.45;white-space:pre-wrap}.bubble--visitor{margin-left:auto;border-radius:9px 4px 9px 9px;color:#fff;background:#1b1b1a}.empty{max-width:250px;margin:45px auto;color:#77776f;text-align:center;font-size:12px;line-height:1.55}.suggestions{display:grid;gap:4px;margin-top:12px;padding:8px;border:1px solid #eadcd5;border-radius:7px;background:#fffdfc}.suggestions small{color:#a3a39a;font-size:9px;font-weight:800;letter-spacing:.07em}.suggestions button{display:flex;justify-content:space-between;padding:3px 0;border:0;color:#9a4529;background:transparent;cursor:pointer;text-align:left;font-size:10.5px;font-weight:700}.composer{display:flex;gap:7px;padding:9px;border-top:1px solid #e5e4e0}.composer input{min-width:0;flex:1;border:0;outline:0;color:#1b1b1a;font:12px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.composer button{width:29px;height:29px;border:0;border-radius:7px;color:#fff;background:#c05a37;cursor:pointer;font-size:16px}.composer button:disabled{opacity:.6;cursor:wait}.footer{padding:7px;color:#a3a39a;text-align:center;font-size:9.5px}.error{margin:8px 0;padding:7px;border-radius:5px;color:#b3372c;background:#fbeae7;font-size:10.5px}</style>' +
+    ':host{all:initial}*{box-sizing:border-box}.launcher{position:fixed;right:22px;bottom:22px;width:54px;height:54px;border:0;border-radius:50%;color:#fff;background:#c05a37;box-shadow:0 12px 30px rgba(28,24,18,.24);cursor:pointer;font:700 24px/1 Georgia,serif}.launcher:hover{transform:translateY(-1px)}.launcher::after{position:absolute;top:4px;right:4px;width:9px;height:9px;content:"";border:2px solid #fff;border-radius:50%;background:#1f8b5c}.panel{position:fixed;right:22px;bottom:22px;width:min(360px,calc(100vw - 36px));overflow:hidden;border:1px solid #e5e4e0;border-radius:12px;background:#fff;box-shadow:0 18px 46px rgba(28,24,18,.24);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#1b1b1a}.panel[hidden],.launcher[hidden]{display:none}.header{display:flex;align-items:center;justify-content:space-between;padding:14px;color:#fff;background:#1b1b1a}.identity{display:flex;align-items:center;gap:8px}.mark{width:27px;height:27px;display:grid;place-items:center;border-radius:7px;background:#c05a37;font:700 15px/1 Georgia,serif}.identity strong,.identity span{display:block}.identity strong{font-size:12px}.identity span{margin-top:2px;color:#d7d5d0;font-size:10px}.online{display:inline-block;width:6px;height:6px;margin-right:4px;border-radius:50%;background:#69c68d}.close{border:0;color:#d7d5d0;background:transparent;cursor:pointer;font-size:21px}.messages{min-height:276px;max-height:48vh;overflow:auto;padding:13px;background:#f8f7f5}.bubble{max-width:84%;margin:7px 0;padding:9px 10px;border-radius:4px 9px 9px;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.05);font-size:12px;line-height:1.45;white-space:pre-wrap}.bubble--visitor{margin-left:auto;border-radius:9px 4px 9px 9px;color:#fff;background:#1b1b1a}.empty{max-width:250px;margin:45px auto;color:#77776f;text-align:center;font-size:12px;line-height:1.55}.suggestions{display:grid;gap:4px;margin-top:12px;padding:8px;border:1px solid #eadcd5;border-radius:7px;background:#fffdfc}.suggestions small{color:#a3a39a;font-size:9px;font-weight:800;letter-spacing:.07em}.suggestions button{display:flex;justify-content:space-between;padding:3px 0;border:0;color:#9a4529;background:transparent;cursor:pointer;text-align:left;font-size:10.5px;font-weight:700}.composer{display:flex;gap:7px;padding:9px;border-top:1px solid #e5e4e0}.composer input{min-width:0;flex:1;border:0;outline:0;color:#1b1b1a;font:12px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.composer button{width:29px;height:29px;border:0;border-radius:7px;color:#fff;background:#c05a37;cursor:pointer;font-size:16px}.composer button:disabled{opacity:.6;cursor:wait}.error{margin:8px 0;padding:7px;border-radius:5px;color:#b3372c;background:#fbeae7;font-size:10.5px}</style>' +
     '<button class="launcher" type="button" aria-label="Open support chat">i</button>' +
-    '<section class="panel" hidden aria-label="Support chat"><header class="header"><div class="identity"><i class="mark">i</i><div><strong class="workspace-name">Support</strong><span><b class="online"></b>Typically replies in minutes</span></div></div><button class="close" type="button" aria-label="Minimize chat">−</button></header><div class="messages" aria-live="polite"></div><form class="composer"><input maxlength="8000" aria-label="Message" placeholder="Write a message…" /><button type="submit" aria-label="Send message">↑</button></form><footer>Powered by Intercom</footer></section>';
+    '<section class="panel" hidden aria-label="Support chat"><header class="header"><div class="identity"><i class="mark">i</i><div><strong class="workspace-name">Support</strong><span><b class="online"></b>Typically replies in minutes</span></div></div><button class="close" type="button" aria-label="Minimize chat">−</button></header><div class="messages" aria-live="polite"></div><form class="composer"><input maxlength="8000" aria-label="Message" placeholder="Write a message…" /><button type="submit" aria-label="Send message">↑</button></form></section>';
   const launcher = shadow.querySelector(".launcher");
   const panel = shadow.querySelector(".panel");
   const close = shadow.querySelector(".close");
@@ -58,15 +59,33 @@ const widgetSource = String.raw`(() => {
       empty.className = "empty";
       empty.textContent = "Ask a question, and we’ll connect you with the right person.";
       list.append(empty);
-      return;
+    } else {
+      messages.forEach(message => {
+        const bubble = document.createElement("p");
+        bubble.className = "bubble" + (message.sender_type === "contact" ? " bubble--visitor" : "");
+        bubble.textContent = message.body_text;
+        list.append(bubble);
+      });
     }
-    messages.forEach(message => {
-      const bubble = document.createElement("p");
-      bubble.className = "bubble" + (message.sender_type === "contact" ? " bubble--visitor" : "");
-      bubble.textContent = message.body_text;
-      list.append(bubble);
-    });
+    renderSuggestions();
     list.scrollTop = list.scrollHeight;
+  }
+
+  function renderSuggestions() {
+    if (!suggestedArticles.length) return;
+    const suggestions = document.createElement("div");
+    suggestions.className = "suggestions";
+    const label = document.createElement("small");
+    label.textContent = "HELPFUL ARTICLES";
+    suggestions.append(label);
+    suggestedArticles.forEach(article => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = article.title + "  →";
+      button.addEventListener("click", () => window.open(apiOrigin + "/help?workspace=" + encodeURIComponent(workspacePublicId) + "&article=" + encodeURIComponent(article.slug), "_blank", "noopener"));
+      suggestions.append(button);
+    });
+    list.append(suggestions);
   }
 
   function renderError(message) {
@@ -77,25 +96,15 @@ const widgetSource = String.raw`(() => {
   }
 
   async function suggest(query) {
-    const previous = list.querySelector(".suggestions");
-    if (previous) previous.remove();
-    if (query.trim().length < 4 || !visitorToken) return;
+    suggestedArticles = [];
+    if (query.trim().length < 4 || !visitorToken) {
+      setMessages(messages);
+      return;
+    }
     try {
       const payload = await request("/api/widget/knowledge-suggestions", { method: "POST", body: JSON.stringify({ workspacePublicId, visitorToken, query }) });
-      if (!payload.articles || !payload.articles.length) return;
-      const suggestions = document.createElement("div");
-      suggestions.className = "suggestions";
-      const label = document.createElement("small");
-      label.textContent = "HELPFUL ARTICLES";
-      suggestions.append(label);
-      payload.articles.forEach(article => {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.textContent = article.title + "  →";
-        button.addEventListener("click", () => window.open(apiOrigin + "/help?article=" + encodeURIComponent(article.slug), "_blank", "noopener"));
-        suggestions.append(button);
-      });
-      list.append(suggestions);
+      suggestedArticles = payload.articles || [];
+      setMessages(messages);
     } catch (_) { /* Suggestions are optional and must never block chatting. */ }
   }
 

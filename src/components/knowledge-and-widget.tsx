@@ -7,6 +7,7 @@ type Notice = (message: string) => void;
 type Article = {
   id: string;
   sectionId?: string;
+  slug?: string;
   title: string;
   excerpt: string;
   category: string;
@@ -206,34 +207,41 @@ export function KnowledgeSurface({ onToast, workspaceId }: { onToast: Notice; wo
   );
 }
 
-type PublicCategory = { name: string; slug: string; sections?: Array<{ name: string; articles?: Array<{ id: string; title: string; slug: string; excerpt?: string | null }> }> };
+type PublicCategory = { name: string; slug: string; sections?: Array<{ name: string; articles?: Array<{ id: string; title: string; slug: string; excerpt?: string | null; content_html?: string | null }> }> };
 
 function flattenPublicCategories(categories: PublicCategory[]): Article[] {
   return categories.flatMap((category) => (
     (category.sections ?? []).flatMap((section) => (
       (section.articles ?? []).map((article) => ({
         id: article.id,
+        slug: article.slug,
         title: article.title,
         excerpt: article.excerpt ?? "",
         category: category.name,
         section: section.name,
         status: "Published" as const,
         updated: "",
+        contentHtml: article.content_html ?? undefined,
       }))
     ))
   ));
 }
 
-export function HelpCenterSurface({ onToast, live = false }: { onToast: Notice; live?: boolean }) {
+export function HelpCenterSurface({ onToast, live = false, workspacePublicId, initialArticleSlug }: { onToast: Notice; live?: boolean; workspacePublicId?: string; initialArticleSlug?: string }) {
   const [query, setQuery] = useState("");
   const [remoteArticles, setRemoteArticles] = useState<Article[]>([]);
   const [remoteCategories, setRemoteCategories] = useState<PublicCategory[]>([]);
   const [loading, setLoading] = useState(false);
+  const [openedArticle, setOpenedArticle] = useState<Article | null>(null);
+  const [requestedArticleSlug, setRequestedArticleSlug] = useState(initialArticleSlug ?? "");
 
   useEffect(() => {
     if (!live) return;
     let active = true;
-    const suffix = query.trim() ? `?query=${encodeURIComponent(query.trim())}` : "";
+    const params = new URLSearchParams();
+    if (query.trim()) params.set("query", query.trim());
+    if (workspacePublicId) params.set("workspace", workspacePublicId);
+    const suffix = params.size ? `?${params.toString()}` : "";
     void fetch(`/api/public/knowledge${suffix}`)
       .then(async (response) => {
         const payload = await response.json() as { categories?: PublicCategory[]; articles?: Array<{ id: string; title: string; slug: string; excerpt?: string | null }>; error?: string };
@@ -241,15 +249,23 @@ export function HelpCenterSurface({ onToast, live = false }: { onToast: Notice; 
         if (!active) return;
         if (payload.categories) {
           setRemoteCategories(payload.categories);
-          setRemoteArticles(flattenPublicCategories(payload.categories));
+          const flattened = flattenPublicCategories(payload.categories);
+          setRemoteArticles(flattened);
+          if (requestedArticleSlug) {
+            const requestedArticle = flattened.find((article) => article.slug === requestedArticleSlug);
+            if (requestedArticle) {
+              setOpenedArticle(requestedArticle);
+              setRequestedArticleSlug("");
+            }
+          }
         } else {
-          setRemoteArticles((payload.articles ?? []).map((article) => ({ id: article.id, title: article.title, excerpt: article.excerpt ?? "", category: "Help center", section: "Search result", status: "Published" as const, updated: "" })));
+          setRemoteArticles((payload.articles ?? []).map((article) => ({ id: article.id, slug: article.slug, title: article.title, excerpt: article.excerpt ?? "", category: "Help center", section: "Search result", status: "Published" as const, updated: "" })));
         }
       })
       .catch((error: unknown) => { if (active) onToast(error instanceof Error ? error.message : "Knowledge base could not be loaded."); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [live, onToast, query]);
+  }, [live, onToast, query, requestedArticleSlug, workspacePublicId]);
 
   const articles = live
     ? remoteArticles
@@ -259,12 +275,20 @@ export function HelpCenterSurface({ onToast, live = false }: { onToast: Notice; 
     : categories;
   function updateQuery(nextQuery: string) {
     if (live) setLoading(true);
+    setOpenedArticle(null);
     setQuery(nextQuery);
   }
+  if (openedArticle) return (
+    <section className="help-center help-center--article" aria-label={`${openedArticle.title} article`}>
+      <header className="help-center__hero"><div className="help-center__nav"><span className="help-center__brand"><i>i</i> Intercom</span><button className="help-center__back" onClick={() => { setOpenedArticle(null); setQuery(""); }}>← All articles</button></div></header>
+      <article className="help-article"><span className="eyebrow">{openedArticle.category}</span><h1>{openedArticle.title}</h1>{openedArticle.excerpt && <p className="help-article__excerpt">{openedArticle.excerpt}</p>}<div className="help-article__content" dangerouslySetInnerHTML={{ __html: openedArticle.contentHtml || `<p>${escapeHtml(openedArticle.excerpt || "No article content is available yet.")}</p>` }} /></article>
+      <footer className="help-center__footer"><span>Still need a hand?</span><button onClick={() => onToast("Open the support widget to start a conversation")}>Start a conversation</button></footer>
+    </section>
+  );
   return (
     <section className="help-center" aria-label="Public help center preview">
       <header className="help-center__hero"><div className="help-center__nav"><span className="help-center__brand"><i>i</i> Intercom</span><a href="#contact" onClick={(event) => { event.preventDefault(); onToast("Chat with support is ready from the widget") }}>Contact support</a></div><div className="help-center__intro"><span className="eyebrow">SUPPORT CENTER</span><h1>How can we help?</h1><label className="help-search"><span className="search-field__lens" /><input value={query} onChange={(event) => updateQuery(event.target.value)} placeholder="Search for answers" aria-label="Search the help center" /></label></div></header>
-      <div className="help-center__body"><span className="eyebrow">BROWSE BY TOPIC</span><div className="help-topics">{topicItems.map(([name, section, count]) => <button key={name} onClick={() => updateQuery(name)}><i>{name[0]}</i><strong>{name}</strong><span>{section} · {count}</span><b>→</b></button>)}</div><div className="help-results"><div><h2>{query ? "Search results" : "Popular answers"}</h2><span>{loading ? "Searching…" : `${articles.length} article${articles.length === 1 ? "" : "s"}`}</span></div>{articles.map((article) => <button key={article.id} onClick={() => onToast(`${article.title} opened`)}><span>{article.category}</span><strong>{article.title}</strong><p>{article.excerpt}</p><b>Read article →</b></button>)}{live && !loading && articles.length === 0 && <p className="help-results__empty">There are no published articles here yet.</p>}</div></div>
+      <div className="help-center__body"><span className="eyebrow">BROWSE BY TOPIC</span><div className="help-topics">{topicItems.map(([name, section, count]) => <button key={name} onClick={() => updateQuery(name)}><i>{name[0]}</i><strong>{name}</strong><span>{section} · {count}</span><b>→</b></button>)}</div><div className="help-results"><div><h2>{query ? "Search results" : "Popular answers"}</h2><span>{loading ? "Searching…" : `${articles.length} article${articles.length === 1 ? "" : "s"}`}</span></div>{articles.map((article) => <button key={article.id} onClick={() => { setOpenedArticle(article); setRequestedArticleSlug(""); }}><span>{article.category}</span><strong>{article.title}</strong><p>{article.excerpt}</p><b>Read article →</b></button>)}{live && !loading && articles.length === 0 && <p className="help-results__empty">There are no published articles here yet.</p>}</div></div>
       <footer className="help-center__footer"><span>Still need a hand?</span><button onClick={() => onToast("Open the widget at bottom-right to chat with us")}>Start a conversation</button></footer>
     </section>
   );

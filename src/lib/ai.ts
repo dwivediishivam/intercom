@@ -58,6 +58,16 @@ function fallbackReply(message: string, article?: { title: string; excerpt: stri
   return "Thanks for reaching out. I’ve shared this with the team and a teammate will follow up shortly.";
 }
 
+function isSimpleGreeting(message: string) {
+  return /^(?:hi|hello|hey|hii+|good\s+(?:morning|afternoon|evening))(?:\s+(?:there|team|support))?[!.\s]*$/i.test(message.trim());
+}
+
+function greetingInstructions(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "";
+  const instructions = (value as Record<string, unknown>).ai_greeting_instructions;
+  return typeof instructions === "string" ? instructions.trim().slice(0, 1500) : "";
+}
+
 function shouldEscalate(message: string) {
   return /\b(human|agent|person|refund|cancel|chargeback|billing|payment|invoice|security|privacy|legal|urgent|critical|broken|bug|error|not working|complaint)\b/i.test(message);
 }
@@ -287,13 +297,17 @@ export async function generateWidgetAutoReply({
 }): Promise<AiReplyResult> {
   const admin = createAdminClient();
   const escalated = shouldEscalate(message);
-  const { data: articles, error } = await admin
-    .from("knowledge_articles")
-    .select("title, excerpt, content_html")
-    .eq("workspace_id", workspaceId)
-    .eq("status", "published")
-    .limit(8);
+  const [{ data: articles, error }, { data: workspace, error: workspaceError }] = await Promise.all([
+    admin
+      .from("knowledge_articles")
+      .select("title, excerpt, content_html")
+      .eq("workspace_id", workspaceId)
+      .eq("status", "published")
+      .limit(8),
+    admin.from("workspaces").select("name, brand_settings").eq("id", workspaceId).maybeSingle(),
+  ]);
   if (error) throw error;
+  if (workspaceError) throw workspaceError;
   const terms = message.toLowerCase().match(/[a-z0-9]{4,}/g) ?? [];
   const article = (articles ?? []).sort((left, right) => {
     const score = (entry: typeof left) => terms.reduce((total, term) => total + (`${entry.title} ${entry.excerpt ?? ""} ${entry.content_html}`.toLowerCase().includes(term) ? 1 : 0), 0);
@@ -305,9 +319,13 @@ export async function generateWidgetAutoReply({
   try {
     await assertAiQuota(workspaceId);
     const knowledge = article ? `Relevant article:\n${article.title}\n${(article.excerpt ?? article.content_html.replace(/<[^>]+>/g, " ")).slice(0, 900)}` : "No matching published help article.";
+    const greetingGuidance = greetingInstructions(workspace?.brand_settings);
+    const greetingMode = isSimpleGreeting(message);
     const generated = await requestText({
-      instructions: "You are a customer-support assistant. Answer the visitor directly in 90 tokens or fewer, using only the supplied help article and their message. Never invent policy or claim a fix. If the issue needs a human, say that a teammate will follow up and ask for the minimum needed detail. No greeting, signature, markdown, or labels.",
-      input: `Visitor message:\n${message.slice(0, MAX_MESSAGE_CHARS)}\n\n${knowledge}`,
+      instructions: greetingMode
+        ? "You are a customer-support assistant. This is a simple greeting. Reply warmly in 55 tokens or fewer, introduce the product accurately from the workspace greeting instructions, then ask how you can help. Do not invent capabilities, add a signature, markdown, or labels."
+        : "You are a customer-support assistant. Answer the visitor directly in 90 tokens or fewer, using only the supplied help article and their message. Never invent policy or claim a fix. If the issue needs a human, say that a teammate will follow up and ask for the minimum needed detail. No greeting, signature, markdown, or labels.",
+      input: `Workspace: ${workspace?.name ?? "Support team"}\n${greetingMode ? `Workspace greeting instructions:\n${greetingGuidance || "Warmly welcome the visitor, briefly explain the product only if known, then ask what they need help with."}\n\n` : ""}Visitor message:\n${message.slice(0, MAX_MESSAGE_CHARS)}\n\n${knowledge}`,
       maxOutputTokens: 130,
     });
     const providerReply = generated?.text;

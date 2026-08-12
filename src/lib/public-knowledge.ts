@@ -15,6 +15,17 @@ export async function resolvePublicKnowledgeWorkspace(hostname: string) {
   return null;
 }
 
+export async function resolvePublicKnowledgeWorkspaceByPublicId(publicId: string) {
+  const admin = createAdminClient();
+  const { data, error } = await admin
+    .from("workspaces")
+    .select("id")
+    .eq("public_id", publicId)
+    .maybeSingle();
+  if (error) throw error;
+  return data?.id ?? null;
+}
+
 export async function getPublicKnowledgeHome(workspaceId: string) {
   const admin = createAdminClient();
   const [{ data: categories, error: categoriesError }, { data: sections, error: sectionsError }, { data: articles, error: articlesError }] =
@@ -31,7 +42,7 @@ export async function getPublicKnowledgeHome(workspaceId: string) {
         .order("position", { ascending: true }),
       admin
         .from("knowledge_articles")
-        .select("id, section_id, title, slug, excerpt, published_at")
+        .select("id, section_id, title, slug, excerpt, content_html, published_at")
         .eq("workspace_id", workspaceId)
         .eq("status", "published")
         .order("published_at", { ascending: false }),

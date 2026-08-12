@@ -27,7 +27,7 @@ function updatedLabel(value: string | null) {
   return `${Math.floor(seconds / 86_400)}d`;
 }
 
-async function getWorkspaceView() {
+async function getWorkspaceView(preferredWorkspaceId?: string) {
   try {
     const supabase = await createServerSupabaseClient();
     const { data: { user } } = await supabase.auth.getUser();
@@ -45,12 +45,14 @@ async function getWorkspaceView() {
       console.error("Unable to send welcome email", welcomeError);
     }
 
-    const { data: membership, error: membershipError } = await supabase
+    let membershipQuery = supabase
       .from("workspace_members")
       .select("workspace_id, role, workspaces(id, public_id, name, slug)")
-      .eq("profile_id", user.id)
-      .limit(1)
-      .maybeSingle();
+      .eq("profile_id", user.id);
+    if (preferredWorkspaceId && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(preferredWorkspaceId)) {
+      membershipQuery = membershipQuery.eq("workspace_id", preferredWorkspaceId);
+    }
+    const { data: membership, error: membershipError } = await membershipQuery.limit(1).maybeSingle();
     if (membershipError) throw membershipError;
     if (!membership) return { kind: "onboarding" as const };
 
@@ -171,8 +173,9 @@ async function getWorkspaceView() {
   }
 }
 
-export default async function AppPage() {
-  const view = await getWorkspaceView();
+export default async function AppPage({ searchParams }: { searchParams: Promise<{ workspace?: string }> }) {
+  const { workspace: preferredWorkspaceId } = await searchParams;
+  const view = await getWorkspaceView(preferredWorkspaceId);
   if (view.kind === "unauthenticated") redirect("/login");
   if (view.kind === "onboarding") redirect("/onboarding");
   if (view.kind === "workspace") return <AppShell initialWorkspace={view.workspace} initialConversations={view.conversations} isDemo={false} />;
