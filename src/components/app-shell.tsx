@@ -4,7 +4,7 @@ import { KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { ConversationWorkspace } from "@/components/conversation-workspace";
-import { HelpCenterSurface, KnowledgeSurface, WidgetDemoSurface } from "@/components/knowledge-and-widget";
+import { KnowledgeSurface } from "@/components/knowledge-and-widget";
 import { AnalyticsSurface, SettingsSurface } from "@/components/operations-surfaces";
 import { RealtimeBridge } from "@/components/realtime-bridge";
 import {
@@ -14,7 +14,7 @@ import {
   type SlaState,
 } from "@/lib/demo-data";
 
-type Screen = "inbox" | "knowledge" | "analytics" | "settings" | "help" | "widget" | "auth";
+type Screen = "inbox" | "knowledge" | "analytics" | "settings";
 type SavedView = "all" | "breaching" | "mine" | "unassigned" | "awaiting";
 type WorkspaceView = {
   id?: string;
@@ -32,12 +32,6 @@ const mainNavigation: Array<{ key: Screen; label: string }> = [
   { key: "knowledge", label: "Knowledge base" },
   { key: "analytics", label: "Analytics" },
   { key: "settings", label: "Settings" },
-];
-
-const publicNavigation: Array<{ key: Screen; label: string }> = [
-  { key: "help", label: "Help center" },
-  { key: "widget", label: "Widget demo" },
-  { key: "auth", label: "Sign in & onboarding" },
 ];
 
 const savedViews: Array<{ key: SavedView; label: string }> = [
@@ -82,6 +76,8 @@ export function AppShell({
   const [toast, setToast] = useState<string | null>(null);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [realtimeStatus, setRealtimeStatus] = useState<"connecting" | "connected" | "reconnecting" | "error">("connecting");
+  const [showRealtimeBanner, setShowRealtimeBanner] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
   const [conversations, setConversations] = useState(initialConversations);
@@ -146,6 +142,12 @@ export function AppShell({
 
   function announce(message: string) {
     setToast(message);
+  }
+
+  function refreshWorkspace() {
+    setRefreshing(true);
+    router.refresh();
+    window.setTimeout(() => setRefreshing(false), 650);
   }
 
   async function updateConversationStatus(action: "resolve" | "snooze") {
@@ -249,7 +251,6 @@ export function AppShell({
         <div className="sidebar__brand-row">
           <div className="brand-mark" aria-hidden="true">I</div>
           <span className="brand-name">Intercom</span>
-          <kbd>⌘K</kbd>
           <button className="sidebar__close" onClick={() => setSidebarOpen(false)} aria-label="Close navigation">×</button>
         </div>
 
@@ -259,7 +260,7 @@ export function AppShell({
             <button
               className={`nav-item ${screen === item.key ? "nav-item--active" : ""}`}
               key={item.key}
-              onClick={() => item.key === "auth" ? router.push("/login") : changeScreen(item.key)}
+              onClick={() => changeScreen(item.key)}
             >
               <span className="nav-item__dot" />
               <span>{item.label}</span>
@@ -268,37 +269,23 @@ export function AppShell({
           ))}
         </nav>
 
-        <span className="nav-caption nav-caption--customer">CUSTOMER-FACING</span>
-        <nav className="sidebar__nav">
-          {publicNavigation.map((item) => (
-            <button
-              className={`nav-item ${screen === item.key ? "nav-item--active" : ""}`}
-              key={item.key}
-              onClick={() => item.key === "auth" ? router.push("/login") : changeScreen(item.key)}
-            >
-              <span className="nav-item__dot" />
-              <span>{item.label}</span>
-            </button>
-          ))}
-        </nav>
-
-        <div className="sidebar__profile">
+        <button className="sidebar__profile" onClick={() => changeScreen("settings")} aria-label="Open workspace settings">
           <div className="avatar avatar--current">{initialWorkspace.currentUser.initials}</div>
           <div>
             <strong>{initialWorkspace.currentUser.name}</strong>
             <span>{initialWorkspace.currentUser.role} · {initialWorkspace.currentUser.location}</span>
           </div>
-        </div>
+        </button>
       </aside>
 
       {sidebarOpen && <button className="sidebar-scrim" aria-label="Close navigation" onClick={() => setSidebarOpen(false)} />}
 
       <main className="workspace">
-        <div className="realtime-banner" role="status">
+        {showRealtimeBanner && <div className="realtime-banner" role="status">
           <span className={`realtime-banner__indicator realtime-banner__indicator--${isDemo ? "preview" : realtimeStatus}`} aria-hidden="true" />
           <span>{isDemo ? "Previewing a demo workspace. Sign in to connect live conversations." : realtimeStatus === "connected" ? "Live updates connected. New messages appear automatically." : "Reconnecting to the realtime channel. Replies will deliver automatically."}</span>
-          <button onClick={() => announce("Realtime notice dismissed")}>Dismiss</button>
-        </div>
+          <button onClick={() => setShowRealtimeBanner(false)}>Dismiss</button>
+        </div>}
 
         {!isDemo && initialWorkspace.id && <RealtimeBridge workspaceId={initialWorkspace.id} onStatus={setRealtimeStatus} />}
 
@@ -328,6 +315,7 @@ export function AppShell({
                   {isDemo && <DemoBadge />}
                 </div>
                 <div className="header-actions">
+                  {!isDemo && <button className="button button--secondary" onClick={refreshWorkspace} disabled={refreshing}>{refreshing ? "Refreshing…" : "Refresh"}</button>}
                   {isDemo && <button className="button button--secondary" onClick={() => setShowEmpty((current) => !current)}>
                     {showEmpty ? "Show conversations" : "Preview empty state"}
                   </button>}
@@ -438,19 +426,15 @@ export function AppShell({
           </section>
         ) : screen === "knowledge" ? (
           <KnowledgeSurface onToast={announce} workspaceId={isDemo ? undefined : initialWorkspace.id} />
-        ) : screen === "help" ? (
-          <HelpCenterSurface onToast={announce} />
-        ) : screen === "widget" ? (
-          <WidgetDemoSurface onToast={announce} />
         ) : screen === "analytics" ? (
           <AnalyticsSurface onToast={announce} workspaceId={isDemo ? undefined : initialWorkspace.id} />
         ) : screen === "settings" ? (
-          <SettingsSurface onToast={announce} workspaceId={isDemo ? undefined : initialWorkspace.id} workspacePublicId={isDemo ? undefined : initialWorkspace.publicId} workspaceName={initialWorkspace.name} workspaceSlug={initialWorkspace.slug} appUrl={initialWorkspace.appUrl} inboundEmailDomain={initialWorkspace.inboundEmailDomain} members={initialWorkspace.members} />
+          <SettingsSurface onToast={announce} workspaceId={isDemo ? undefined : initialWorkspace.id} workspacePublicId={isDemo ? undefined : initialWorkspace.publicId} workspaceName={initialWorkspace.name} workspaceSlug={initialWorkspace.slug} appUrl={initialWorkspace.appUrl} inboundEmailDomain={initialWorkspace.inboundEmailDomain} members={initialWorkspace.members} isAdmin={initialWorkspace.currentUser.role === "Admin"} />
         ) : (
           <section className="surface-placeholder">
             <span className="eyebrow">INTERCOM</span>
-            <h1>{mainNavigation.concat(publicNavigation).find((item) => item.key === screen)?.label}</h1>
-            <p>This surface is being implemented from the supplied reference system. The shared navigation, visual tokens, responsive behavior, and data model are already in place.</p>
+            <h1>That page is unavailable.</h1>
+            <p>Return to the inbox to continue working with your workspace.</p>
             <button className="button button--primary" onClick={() => changeScreen("inbox")}>Return to inbox</button>
           </section>
         )}

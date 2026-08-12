@@ -51,6 +51,10 @@ export async function getWorkspaceAnalytics(workspaceId: string, range: Analytic
   return {
     volume: conversations?.length ?? 0,
     resolved: conversations?.filter((conversation) => conversation.status === "resolved").length ?? 0,
+    channels: {
+      chat: conversations?.filter((conversation) => conversation.channel === "chat").length ?? 0,
+      email: conversations?.filter((conversation) => conversation.channel === "email").length ?? 0,
+    },
     averageFirstResponseSeconds: average(firstResponseSeconds),
     averageResolutionSeconds: average(resolutionSeconds),
     busiestHours,

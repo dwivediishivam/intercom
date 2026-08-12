@@ -20,7 +20,7 @@ export async function GET(
   try {
     const { workspaceId } = await context.params;
     uuidSchema.parse(workspaceId);
-    await requireWorkspaceMembership(workspaceId, ["admin"]);
+    await requireWorkspaceMembership(workspaceId);
     const params = querySchema.parse(Object.fromEntries(request.nextUrl.searchParams));
     const to = params.to ? new Date(params.to) : new Date();
     const from = params.from ? new Date(params.from) : new Date(to.getTime() - 30 * 24 * 60 * 60 * 1000);
