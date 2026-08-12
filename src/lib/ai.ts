@@ -310,9 +310,14 @@ export async function generateWidgetAutoReply({
       input: `Visitor message:\n${message.slice(0, MAX_MESSAGE_CHARS)}\n\n${knowledge}`,
       maxOutputTokens: 130,
     });
-    const reply = generated?.text || fallbackReply(message, article);
+    const providerReply = generated?.text;
+    // A provider occasionally returns a generic escalation even when a matched
+    // article contains the answer. Prefer the grounded local rendering in that
+    // case so the visitor receives useful help immediately.
+    const providerDeclinedKnownAnswer = Boolean(article && providerReply && /doesn.?t (include|cover|have)|teammate will follow up|cannot find/i.test(providerReply));
+    const reply = !providerDeclinedKnownAnswer && providerReply ? providerReply : fallbackReply(message, article);
     await recordAiUsage({ workspaceId, conversationId, feature: "reply_draft", model: generated?.model ?? `${getServerEnvironment().OPENAI_MODEL}:fallback`, inputTokens: generated?.inputTokens ?? 0, outputTokens: generated?.outputTokens ?? 0 });
-    return { reply, usedFallback: !generated?.text, escalated };
+    return { reply, usedFallback: !providerReply || providerDeclinedKnownAnswer, escalated };
   } catch (error) {
     console.warn("Widget AI reply failed; using a safe fallback.", error);
     return { reply: fallbackReply(message, article), usedFallback: true, escalated };
