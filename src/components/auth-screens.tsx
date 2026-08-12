@@ -14,7 +14,7 @@ function readableError(error: unknown) {
   return "Something went wrong. Please try again.";
 }
 
-export function AuthenticationSurface({ initialMode = "sign-in" }: { initialMode?: AuthMode }) {
+export function AuthenticationSurface({ initialMode = "sign-in", nextPath = "/app" }: { initialMode?: AuthMode; nextPath?: string }) {
   const router = useRouter();
   const [mode, setMode] = useState<AuthMode>(initialMode);
   const [email, setEmail] = useState("");
@@ -30,7 +30,7 @@ export function AuthenticationSurface({ initialMode = "sign-in" }: { initialMode
       const supabase = createBrowserSupabaseClient();
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
-        options: { redirectTo: `${window.location.origin}/auth/callback?next=/app` },
+        options: { redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(nextPath)}` },
       });
       if (error) throw error;
     } catch (error) {
@@ -48,18 +48,18 @@ export function AuthenticationSurface({ initialMode = "sign-in" }: { initialMode
       if (mode === "sign-in") {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
-        router.replace("/app");
+        router.replace(nextPath);
         router.refresh();
         return;
       }
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
-        options: { emailRedirectTo: `${window.location.origin}/auth/callback?next=/onboarding` },
+        options: { emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(nextPath === "/app" ? "/onboarding" : nextPath)}` },
       });
       if (error) throw error;
       if (data.session) {
-        router.replace("/onboarding");
+        router.replace(nextPath === "/app" ? "/onboarding" : nextPath);
         router.refresh();
         return;
       }

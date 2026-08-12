@@ -3,8 +3,9 @@ import { AuthenticationSurface } from "@/components/auth-screens";
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ mode?: string }>;
+  searchParams: Promise<{ mode?: string; next?: string }>;
 }) {
-  const { mode } = await searchParams;
-  return <AuthenticationSurface initialMode={mode === "signup" ? "sign-up" : "sign-in"} />;
+  const { mode, next } = await searchParams;
+  const nextPath = next?.startsWith("/") && !next.startsWith("//") ? next : "/app";
+  return <AuthenticationSurface initialMode={mode === "signup" ? "sign-up" : "sign-in"} nextPath={nextPath} />;
 }

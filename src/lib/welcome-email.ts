@@ -49,8 +49,8 @@ function welcomeEmailHtml(name?: string | null) {
 
 /**
  * Sends one welcome message after a new user first reaches the authenticated
- * product. The profile timestamp makes the operation safe across OAuth and
- * password sign-in flows.
+ * product. Auth metadata makes this safe across OAuth and password flows
+ * without relying on an optional application-table migration.
  */
 export async function sendWelcomeEmailIfNeeded({
   userId,
@@ -69,28 +69,24 @@ export async function sendWelcomeEmailIfNeeded({
   }
 
   const admin = createAdminClient();
-  const { data: profile, error: profileError } = await admin
-    .from("profiles")
-    .select("full_name, welcome_email_sent_at")
-    .eq("id", userId)
-    .maybeSingle();
-  if (profileError) throw profileError;
-  if (profile?.welcome_email_sent_at) return { sent: false, reason: "already_sent" as const };
+  const { data: userResult, error: userError } = await admin.auth.admin.getUserById(userId);
+  if (userError) throw userError;
+  const metadata = userResult.user?.user_metadata ?? {};
+  if (metadata.intercom_welcome_email_sent_at) return { sent: false, reason: "already_sent" as const };
 
   const resend = new Resend(environment.RESEND_API_KEY);
   const { error } = await resend.emails.send({
     from: environment.RESEND_FROM_EMAIL,
     to: [email],
     subject: "Welcome to Intercom — your customer inbox is ready",
-    html: welcomeEmailHtml(profile?.full_name ?? fullName),
-    text: `Hi ${firstName(profile?.full_name ?? fullName)},\n\nWelcome to Intercom. Create your workspace, invite your team, and bring every customer conversation into one focused inbox.\n\nOpen ${environment.NEXT_PUBLIC_APP_URL}/onboarding to get started.`,
+    html: welcomeEmailHtml(fullName),
+    text: `Hi ${firstName(fullName)},\n\nWelcome to Intercom. Create your workspace, invite your team, and bring every customer conversation into one focused inbox.\n\nOpen ${environment.NEXT_PUBLIC_APP_URL}/onboarding to get started.`,
   });
   if (error) throw error;
 
-  const { error: updateError } = await admin
-    .from("profiles")
-    .update({ welcome_email_sent_at: new Date().toISOString() })
-    .eq("id", userId);
+  const { error: updateError } = await admin.auth.admin.updateUserById(userId, {
+    user_metadata: { ...metadata, intercom_welcome_email_sent_at: new Date().toISOString() },
+  });
   if (updateError) throw updateError;
   return { sent: true as const };
 }
