@@ -105,9 +105,9 @@ export function KnowledgeSurface({ onToast, workspaceId }: { onToast: Notice; wo
   const filtered = useMemo(() => articles.filter((article) => {
     const collectionId = sections.find((section) => section.id === article.sectionId)?.category_id;
     return (status === "All" || article.status === status) &&
-      (selectedCollectionId === "all" || collectionId === selectedCollectionId) &&
+      (selectedCollectionId === "all" || (isLive ? collectionId === selectedCollectionId : article.category === selectedCollectionId)) &&
       [article.title, article.excerpt, article.category].join(" ").toLowerCase().includes(query.toLowerCase());
-  }), [articles, query, sections, selectedCollectionId, status]);
+  }), [articles, isLive, query, sections, selectedCollectionId, status]);
 
   async function publishArticle() {
     const title = draftTitle.trim();
