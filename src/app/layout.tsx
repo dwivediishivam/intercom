@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 
 import "./globals.css";
+import "./form-fixes.css";
 
 export const metadata: Metadata = {
   title: "Intercom",

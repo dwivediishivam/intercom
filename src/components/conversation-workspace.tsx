@@ -285,7 +285,6 @@ export function ConversationWorkspace({ conversation, onBack, onToast, onResolve
         </div>
         <div className="conversation-workspace__actions">
           {!isDemo && <label className="conversation-assignee"><span>Owner</span><select value={conversation.assigneeId ?? ""} onChange={(event) => void updateAssignment(event.target.value)} disabled={assignmentSaving || currentUser.role !== "Admin"} aria-label="Assign conversation"><option value="">Unassigned</option>{workspaceMembers.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></label>}
-          <button className="icon-action" aria-label="More conversation actions" onClick={() => onToast("Conversation actions are ready")}>•••</button>
           <button className="button button--secondary" onClick={onSnooze}>Snooze</button>
           <button className="button button--primary" onClick={onResolve}>Resolve</button>
         </div>

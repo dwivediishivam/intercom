@@ -15,11 +15,11 @@ export async function POST(
     const { workspaceId } = await context.params;
     uuidSchema.parse(workspaceId);
     await requireWorkspaceMembership(workspaceId, ["admin"]);
-    const category = await createKnowledgeCategory({
+    const result = await createKnowledgeCategory({
       workspaceId,
       ...knowledgeCategorySchema.parse(await request.json()),
     });
-    return NextResponse.json({ category }, { status: 201 });
+    return NextResponse.json(result, { status: 201 });
   } catch (error) {
     return toErrorResponse(error);
   }

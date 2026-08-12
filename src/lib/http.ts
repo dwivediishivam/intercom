@@ -24,6 +24,16 @@ export function toErrorResponse(error: unknown) {
     return NextResponse.json({ error: error.message }, { status: 429 });
   }
 
+  if (error && typeof error === "object" && "code" in error) {
+    const code = (error as { code?: string }).code;
+    if (code === "23505") {
+      return NextResponse.json({ error: "That item already exists in this workspace." }, { status: 409 });
+    }
+    if (code === "23503") {
+      return NextResponse.json({ error: "The selected item no longer exists. Refresh and try again." }, { status: 409 });
+    }
+  }
+
   console.error("Unhandled API error", error);
   return NextResponse.json({ error: "Something went wrong." }, { status: 500 });
 }

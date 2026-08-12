@@ -3,6 +3,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { getPublicEnvironment } from "@/lib/env";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { enqueueWorkspaceWebhook } from "@/lib/outbound-webhooks";
+import { generateWidgetAutoReply } from "@/lib/ai";
 
 function hashVisitorToken(token: string) {
   return createHash("sha256").update(token).digest("hex");
@@ -229,7 +230,54 @@ export async function sendVisitorMessage({
     payload: { conversation_id: activeConversationId, message_id: message.id, channel: "chat" },
   });
 
-  return { conversationId: activeConversationId, message, visitorToken: visitor.visitorToken };
+  // A visitor should never be left staring at an inert demo widget. The
+  // assistant answers from published help content where available and escalates
+  // high-risk requests to the first available team member for follow-up.
+  const autoReply = await generateWidgetAutoReply({
+    workspaceId: visitor.workspaceId,
+    conversationId: activeConversationId,
+    message: bodyText,
+  });
+  const { data: responder, error: responderError } = await admin
+    .from("workspace_members")
+    .select("profile_id")
+    .eq("workspace_id", visitor.workspaceId)
+    .order("role", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (responderError) throw responderError;
+  if (!responder) throw new Error("This workspace has no team member available to respond.");
+
+  const { data: assistantMessage, error: assistantError } = await admin
+    .from("messages")
+    .insert({
+      workspace_id: visitor.workspaceId,
+      conversation_id: activeConversationId,
+      sender_type: "ai",
+      sender_profile_id: responder.profile_id,
+      body_text: autoReply.reply,
+      delivery_status: "sent",
+      sent_at: new Date().toISOString(),
+    })
+    .select()
+    .single();
+  if (assistantError) throw assistantError;
+
+  if (autoReply.escalated) {
+    const { error: routeError } = await admin
+      .from("conversations")
+      .update({ assignee_id: responder.profile_id, priority: 2, status: "open", snoozed_until: null })
+      .eq("id", activeConversationId);
+    if (routeError) throw routeError;
+  }
+
+  await enqueueWorkspaceWebhook({
+    workspaceId: visitor.workspaceId,
+    eventType: "message.created",
+    payload: { conversation_id: activeConversationId, message_id: assistantMessage.id, channel: "chat", sender_type: "ai" },
+  });
+
+  return { conversationId: activeConversationId, message, assistantMessage, visitorToken: visitor.visitorToken };
 }
 
 /** Stores a short-lived typing marker with the visitor session. Durable messages remain the source of truth. */

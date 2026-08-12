@@ -1,0 +1,5 @@
+.compact-form input,
+.compact-form textarea {
+  font-family: inherit;
+  font-size: 11.5px;
+}

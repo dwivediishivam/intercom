@@ -15,7 +15,7 @@ export async function createKnowledgeCategory({
   position?: number;
 }) {
   const admin = createAdminClient();
-  const { data, error } = await admin
+  const { data: category, error } = await admin
     .from("knowledge_categories")
     .insert({
       workspace_id: workspaceId,
@@ -27,7 +27,24 @@ export async function createKnowledgeCategory({
     .select()
     .single();
   if (error) throw error;
-  return data;
+
+  // Sections are a storage detail retained for the existing schema. Every
+  // customer-facing collection receives one invisible “General” section, so
+  // article publishing never asks a workspace owner to understand two levels
+  // of taxonomy before they can help a customer.
+  const { data: defaultSection, error: sectionError } = await admin
+    .from("knowledge_sections")
+    .insert({
+      workspace_id: workspaceId,
+      category_id: category.id,
+      name: "General",
+      slug: "general",
+      position: 0,
+    })
+    .select()
+    .single();
+  if (sectionError) throw sectionError;
+  return { category, defaultSection };
 }
 
 export async function createKnowledgeSection({
